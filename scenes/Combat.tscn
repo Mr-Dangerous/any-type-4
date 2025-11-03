@@ -1,0 +1,173 @@
+[gd_scene load_steps=3 format=3 uid="uid://c2k8yv3xswji"]
+
+[ext_resource type="Script" uid="uid://cra27vfyu4feh" path="res://scripts/Combat.gd" id="1_combat"]
+[ext_resource type="Texture2D" uid="uid://dg7x8c5v2nwji" path="res://assets/sprites/slime.svg" id="2_slime"]
+
+[node name="Combat" type="Node2D"]
+script = ExtResource("1_combat")
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="Background" type="ColorRect" parent="UI"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.15, 0.15, 0.2, 1)
+
+[node name="SlimeSprite" type="TextureRect" parent="UI"]
+offset_left = 450.0
+offset_top = 200.0
+offset_right = 650.0
+offset_bottom = 400.0
+texture = ExtResource("2_slime")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="EnemyInfo" type="VBoxContainer" parent="UI"]
+offset_left = 450.0
+offset_top = 100.0
+offset_right = 650.0
+offset_bottom = 200.0
+
+[node name="EnemyLabel" type="Label" parent="UI/EnemyInfo"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "Slime"
+horizontal_alignment = 1
+
+[node name="EnemyHPLabel" type="Label" parent="UI/EnemyInfo"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.3, 0.3, 1)
+theme_override_font_sizes/font_size = 20
+text = "HP: 25/25"
+horizontal_alignment = 1
+
+[node name="PlayerInfo" type="VBoxContainer" parent="UI"]
+offset_left = 50.0
+offset_top = 450.0
+offset_right = 250.0
+offset_bottom = 550.0
+
+[node name="PlayerLabel" type="Label" parent="UI/PlayerInfo"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Player"
+
+[node name="PlayerHPLabel" type="Label" parent="UI/PlayerInfo"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.3, 1, 0.3, 1)
+theme_override_font_sizes/font_size = 18
+text = "HP: 30/30"
+
+[node name="EnergyLabel" type="Label" parent="UI/PlayerInfo"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.3, 0.6, 1, 1)
+theme_override_font_sizes/font_size = 18
+text = "Energy: 3/3"
+
+[node name="BlockLabel" type="Label" parent="UI/PlayerInfo"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.8, 0.8, 0.3, 1)
+theme_override_font_sizes/font_size = 16
+text = "Block: None"
+
+[node name="HandContainer" type="HBoxContainer" parent="UI"]
+offset_left = 200.0
+offset_top = 520.0
+offset_right = 900.0
+offset_bottom = 700.0
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="EndTurnButton" type="Button" parent="UI"]
+offset_left = 920.0
+offset_top = 580.0
+offset_right = 1050.0
+offset_bottom = 640.0
+theme_override_font_sizes/font_size = 20
+text = "End Turn"
+
+[node name="PileInfo" type="VBoxContainer" parent="UI"]
+offset_left = 920.0
+offset_top = 100.0
+offset_right = 1100.0
+offset_bottom = 200.0
+
+[node name="DrawPileLabel" type="Label" parent="UI/PileInfo"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Draw: 20"
+
+[node name="DiscardPileLabel" type="Label" parent="UI/PileInfo"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Discard: 0"
+
+[node name="ToStarMapButton" type="Button" parent="UI"]
+offset_left = 920.0
+offset_top = 30.0
+offset_right = 1070.0
+offset_bottom = 70.0
+theme_override_font_sizes/font_size = 16
+text = "Star Map"
+
+[node name="DeployedShips" type="VBoxContainer" parent="UI"]
+offset_left = 920.0
+offset_top = 220.0
+offset_right = 1100.0
+offset_bottom = 500.0
+theme_override_constants/separation = 5
+
+[node name="DeployedLabel" type="Label" parent="UI/DeployedShips"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "Deployed Ships:"
+
+[node name="ShipsList" type="VBoxContainer" parent="UI/DeployedShips"]
+layout_mode = 2
+theme_override_constants/separation = 3
+
+[node name="PreviousNotificationLabel" type="Label" parent="UI"]
+offset_left = 300.0
+offset_top = 10.0
+offset_right = 800.0
+offset_bottom = 40.0
+theme_override_colors/font_color = Color(1, 1, 0.3, 0.3)
+theme_override_font_sizes/font_size = 16
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="NotificationLabel" type="Label" parent="UI"]
+offset_left = 300.0
+offset_top = 40.0
+offset_right = 800.0
+offset_bottom = 90.0
+theme_override_colors/font_color = Color(1, 1, 0.3, 1)
+theme_override_font_sizes/font_size = 24
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="NextNotificationLabel" type="Label" parent="UI"]
+offset_left = 300.0
+offset_top = 90.0
+offset_right = 800.0
+offset_bottom = 120.0
+theme_override_colors/font_color = Color(1, 1, 0.3, 0.3)
+theme_override_font_sizes/font_size = 16
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="NotificationHelpLabel" type="Label" parent="UI"]
+offset_left = 300.0
+offset_top = 125.0
+offset_right = 800.0
+offset_bottom = 145.0
+theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
+theme_override_font_sizes/font_size = 12
+text = "↑↓ to scroll history"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="ShipsContainer" type="Node2D" parent="UI"]

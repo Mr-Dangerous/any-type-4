@@ -1,0 +1,26 @@
+# Godot 4+ specific ignores
+.godot/
+/android/
+/ios/
+/.mono/
+/data_*/
+
+# Import cache
+*.import
+
+# Build results
+/builds/
+/export/
+/export_presets.cfg
+
+# OS specific
+.DS_Store
+Thumbs.db
+*~
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log

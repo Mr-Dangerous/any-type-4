@@ -1,0 +1,15 @@
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Scout ship - small, fast reconnaissance craft -->
+  <!-- Main body -->
+  <path d="M 32 10 L 40 35 L 32 38 L 24 35 Z" fill="#4A90E2" stroke="#2C5AA0" stroke-width="2"/>
+  <!-- Cockpit -->
+  <ellipse cx="32" cy="18" rx="4" ry="6" fill="#87CEEB" stroke="#2C5AA0" stroke-width="1"/>
+  <!-- Wings -->
+  <path d="M 24 25 L 15 30 L 18 35 L 24 30 Z" fill="#6FA8DC" stroke="#2C5AA0" stroke-width="1.5"/>
+  <path d="M 40 25 L 49 30 L 46 35 L 40 30 Z" fill="#6FA8DC" stroke="#2C5AA0" stroke-width="1.5"/>
+  <!-- Engine glow -->
+  <ellipse cx="32" cy="38" rx="6" ry="3" fill="#FFD700" opacity="0.7"/>
+  <!-- Details -->
+  <line x1="28" y1="20" x2="28" y2="32" stroke="#2C5AA0" stroke-width="1"/>
+  <line x1="36" y1="20" x2="36" y2="32" stroke="#2C5AA0" stroke-width="1"/>
+</svg>

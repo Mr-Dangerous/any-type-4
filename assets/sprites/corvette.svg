@@ -1,0 +1,21 @@
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Corvette ship - fast attack vessel -->
+  <!-- Main body -->
+  <path d="M 32 12 L 42 42 L 32 46 L 22 42 Z" fill="#32CD32" stroke="#228B22" stroke-width="2"/>
+  <!-- Forward section -->
+  <path d="M 32 12 L 38 24 L 32 26 L 26 24 Z" fill="#3CB371" stroke="#228B22" stroke-width="1.5"/>
+  <!-- Cockpit -->
+  <ellipse cx="32" cy="18" rx="4" ry="5" fill="#90EE90" stroke="#228B22" stroke-width="1"/>
+  <!-- Sleek wings -->
+  <path d="M 22 28 L 12 32 L 16 38 L 22 35 Z" fill="#2E8B57" stroke="#228B22" stroke-width="1.5"/>
+  <path d="M 42 28 L 52 32 L 48 38 L 42 35 Z" fill="#2E8B57" stroke="#228B22" stroke-width="1.5"/>
+  <!-- Rear stabilizers -->
+  <path d="M 28 42 L 26 48 L 28 46 Z" fill="#228B22"/>
+  <path d="M 36 42 L 38 48 L 36 46 Z" fill="#228B22"/>
+  <!-- Engine glow -->
+  <ellipse cx="32" cy="46" rx="7" ry="3" fill="#00FF00" opacity="0.7"/>
+  <!-- Details -->
+  <line x1="28" y1="22" x2="28" y1="38" stroke="#228B22" stroke-width="1"/>
+  <line x1="36" y1="22" x2="36" y2="38" stroke="#228B22" stroke-width="1"/>
+  <circle cx="32" cy="30" r="2" fill="#FFD700"/>
+</svg>
