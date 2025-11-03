@@ -19,6 +19,7 @@ var source_ship_id: String = ""  # ID of the ship that created this attack card
 @onready var panel: Panel = $Panel
 @onready var name_label: Label = $Panel/MarginContainer/VBoxContainer/NameLabel
 @onready var cost_label: Label = $Panel/MarginContainer/VBoxContainer/TopBar/CostLabel
+@onready var artwork_area: ColorRect = $Panel/MarginContainer/VBoxContainer/ArtworkArea
 @onready var description_label: Label = $Panel/MarginContainer/VBoxContainer/DescriptionLabel
 @onready var deployed_indicator: Label = null  # Will be created dynamically
 @onready var stats_label: Label = null  # Will be created dynamically
@@ -82,13 +83,23 @@ func update_card_display():
 	if name_label:
 		# Show position in name if deployed
 		if is_deployed and ship_position != "":
-			name_label.text = "%s %s" % [card_name, ship_position]
+			# Replace (deployed) in card name with position
+			var display_name = card_name.replace("(deployed)", ship_position)
+			name_label.text = display_name
 		else:
 			name_label.text = card_name
+
+		# Dynamically resize font to fit
+		resize_name_to_fit()
+
 	if cost_label:
 		cost_label.text = str(cost)
 	if description_label:
-		description_label.text = description
+		# Replace (deployed) with position name in description
+		var display_description = description
+		if is_deployed and ship_position != "":
+			display_description = description.replace("(deployed)", ship_position)
+		description_label.text = display_description
 
 	# Show deployed indicator if ship is deployed
 	if deployed_indicator:
@@ -103,6 +114,34 @@ func update_card_display():
 			stats_label.visible = true
 		else:
 			stats_label.visible = false
+
+func resize_name_to_fit():
+	if not name_label:
+		return
+
+	# Available width is card width (120) minus margins (8*2) = 104 pixels
+	var available_width = 104.0
+	var max_font_size = 16
+	var min_font_size = 10
+
+	# Start with max font size and reduce if needed
+	var font_size = max_font_size
+	var current_font = name_label.get_theme_font("font")
+
+	# Measure text width with current font size
+	while font_size >= min_font_size:
+		name_label.add_theme_font_size_override("font_size", font_size)
+
+		# Use font to measure text width
+		if current_font:
+			var text_width = current_font.get_string_size(name_label.text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+			if text_width <= available_width:
+				break
+
+		font_size -= 1
+
+	# Apply the final font size
+	name_label.add_theme_font_size_override("font_size", font_size)
 
 func _gui_input(event):
 	if event is InputEventMouseButton:

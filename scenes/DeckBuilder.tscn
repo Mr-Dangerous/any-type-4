@@ -1,0 +1,54 @@
+[gd_scene load_steps=2 format=3 uid="uid://b8k3yv9xswji"]
+
+[ext_resource type="Script" path="res://scripts/DeckBuilder.gd" id="1_deckbuilder"]
+
+[node name="DeckBuilder" type="Node2D"]
+script = ExtResource("1_deckbuilder")
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="Background" type="ColorRect" parent="UI"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.1, 0.1, 0.15, 1)
+
+[node name="Title" type="Label" parent="UI"]
+offset_left = 400.0
+offset_top = 20.0
+offset_right = 700.0
+offset_bottom = 70.0
+theme_override_font_sizes/font_size = 32
+text = "Deck Builder"
+horizontal_alignment = 1
+
+[node name="DeckCountLabel" type="Label" parent="UI"]
+offset_left = 400.0
+offset_top = 70.0
+offset_right = 700.0
+offset_bottom = 100.0
+theme_override_font_sizes/font_size = 18
+text = "Total Cards: 0"
+horizontal_alignment = 1
+
+[node name="ScrollContainer" type="ScrollContainer" parent="UI"]
+offset_left = 100.0
+offset_top = 120.0
+offset_right = 1000.0
+offset_bottom = 650.0
+
+[node name="CardGrid" type="GridContainer" parent="UI/ScrollContainer"]
+layout_mode = 2
+theme_override_constants/h_separation = 20
+theme_override_constants/v_separation = 20
+columns = 5
+
+[node name="BackButton" type="Button" parent="UI"]
+offset_left = 50.0
+offset_top = 20.0
+offset_right = 200.0
+offset_bottom = 70.0
+theme_override_font_sizes/font_size = 20
+text = "← Back"

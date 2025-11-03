@@ -45,12 +45,28 @@ var card_to_deployed_ship: Dictionary = {}
 @onready var player_hp_label: Label = $UI/PlayerInfo/PlayerHPLabel
 @onready var enemy_hp_label: Label = $UI/EnemyInfo/EnemyHPLabel
 @onready var energy_label: Label = $UI/PlayerInfo/EnergyLabel
-@onready var hand_container: HBoxContainer = $UI/HandContainer
+@onready var hand_container: Control = $UI/HandContainer
+@onready var card_display_zone: Control = $UI/CardDisplayZone
+@onready var discard_pile_zone: Control = $UI/DiscardPileZone
+
+# Hand display constants
+const MAX_HAND_SIZE: int = 10
+const CARD_WIDTH: float = 120.0
+const MAX_CARD_SPACING: float = 130.0  # Maximum spacing between cards
+const MIN_CARD_SPACING: float = 60.0   # Minimum spacing when hand is full
+const HOVER_LIFT: float = 100.0  # How much to lift card on hover
+
+var hovered_card: Card = null
+
+# Card display zone queue
+var display_queue: Array[Dictionary] = []
+var is_displaying_card: bool = false
 @onready var end_turn_button: Button = $UI/EndTurnButton
 @onready var draw_pile_label: Label = $UI/PileInfo/DrawPileLabel
 @onready var discard_pile_label: Label = $UI/PileInfo/DiscardPileLabel
 @onready var player_block_label: Label = $UI/PlayerInfo/BlockLabel
 @onready var to_starmap_button: Button = $UI/ToStarMapButton
+@onready var deck_builder_button: Button = $UI/DeckBuilderButton
 @onready var deployed_ships_list: VBoxContainer = $UI/DeployedShips/ShipsList
 @onready var notification_label: Label = $UI/NotificationLabel
 @onready var previous_notification_label: Label = $UI/PreviousNotificationLabel
@@ -83,12 +99,17 @@ func _ready():
 	# Connect buttons
 	end_turn_button.pressed.connect(_on_end_turn_pressed)
 	to_starmap_button.pressed.connect(_on_to_starmap)
+	deck_builder_button.pressed.connect(_on_deck_builder)
 
-	# Initialize deck
-	initialize_deck()
+	# Check if we have a saved combat state to restore
+	if GameData.has_combat_state:
+		restore_combat_state()
+	else:
+		# Initialize deck
+		initialize_deck()
 
-	# Start first turn
-	start_turn()
+		# Start first turn
+		start_turn()
 
 	# Update UI
 	update_ui()
@@ -149,24 +170,29 @@ func load_cards_from_csv(file_path: String) -> bool:
 	return true
 
 func initialize_deck():
-	# Add 2 Scouts
-	for i in range(2):
-		draw_pile.append(card_database["scout"].duplicate())
+	# Load starting deck from CSV
+	var file = FileAccess.open("res://card_database/starting_deck.csv", FileAccess.READ)
+	if file == null:
+		print("Failed to open starting_deck.csv")
+		return
 
-	# Add 2 Corvettes
-	for i in range(2):
-		draw_pile.append(card_database["corvette"].duplicate())
+	# Read header line
+	var header = file.get_csv_line()
 
-	# Add 2 Interceptors
-	for i in range(2):
-		draw_pile.append(card_database["interceptor"].duplicate())
+	# Read each card name and add to deck
+	while not file.eof_reached():
+		var line = file.get_csv_line()
+		if line.size() > 0 and line[0] != "":
+			var card_name = line[0]
+			# Convert card name to lowercase type key
+			var card_type = card_name.to_lower().replace(" ", "_")
+			if card_database.has(card_type):
+				draw_pile.append(card_database[card_type].duplicate())
+			else:
+				print("Warning: Card type not found in database: ", card_type)
 
-	# Add 3 Fighters
-	for i in range(3):
-		draw_pile.append(card_database["fighter"].duplicate())
-
-	# Add 1 Shields Up
-	draw_pile.append(card_database["shields_up"].duplicate())
+	file.close()
+	print("Loaded ", draw_pile.size(), " cards into starting deck")
 
 	# Shuffle deck
 	draw_pile.shuffle()
@@ -193,7 +219,16 @@ func draw_card():
 
 	if not draw_pile.is_empty():
 		var card_data = draw_pile.pop_front()
-		create_card_in_hand(card_data)
+
+		# Check if hand is full
+		if hand.size() >= MAX_HAND_SIZE:
+			# Show overflow card animation
+			await show_overflow_card(card_data)
+			# Add directly to discard
+			discard_pile.append(card_data)
+			show_notification("Hand full! Card discarded.")
+		else:
+			create_card_in_hand(card_data)
 
 func create_card_in_hand(card_data: Dictionary):
 	var card_instance = CardScene.instantiate()
@@ -229,10 +264,29 @@ func create_card_in_hand(card_data: Dictionary):
 
 	hand.append(card_instance)
 
+	# Connect hover signals
+	card_instance.mouse_entered.connect(_on_card_hover_start.bind(card_instance))
+	card_instance.mouse_exited.connect(_on_card_hover_end.bind(card_instance))
+
+	# Position cards in hand
+	reposition_hand()
+
+func add_card_to_hand_with_display(card_data: Dictionary, display_type: String = "normal"):
+	# Add to display queue with callback to add to hand
+	display_queue.append({
+		"card_data": card_data,
+		"display_type": display_type,
+		"add_to_hand": true  # Flag to add to hand after displaying
+	})
+
+	# Start processing queue if not already displaying
+	if not is_displaying_card:
+		process_display_queue()
+
 func _on_card_played(card: Card):
 	if energy >= card.cost:
-		# Check if this is a ship card
-		var is_ship = card.card_type in ["scout", "corvette", "interceptor", "fighter"]
+		# Check if this is a ship card (including activate versions)
+		var is_ship = card.card_type in ["scout", "corvette", "interceptor", "fighter", "activate_scout", "activate_corvette", "activate_interceptor", "activate_fighter"]
 
 		if is_ship:
 			# Check if this specific card instance has been deployed
@@ -240,25 +294,40 @@ func _on_card_played(card: Card):
 				# Already deployed - use ship ability
 				energy -= card.cost
 
-				# Remove card from hand
-				hand.erase(card)
+				# Check if description has "activate" keyword (stays in hand)
+				var has_activate = "activate" in card.description.to_lower()
+				# Check if description requires discard cost
+				var requires_discard = card.description.begins_with("Discard:")
 
-				# Add to discard pile with deployed info so it can be drawn again
-				var card_data = {
-					"name": card.card_name,
-					"cost": card.cost,
-					"description": card.description,
-					"type": card.card_type,
-					"deployed_instance_id": card.deployed_instance_id,
-					"is_deployed": true
-				}
-				discard_pile.append(card_data)
+				# Determine if card should be discarded
+				var should_discard = not has_activate or requires_discard
 
-				# Remove from UI
-				card.queue_free()
+				if should_discard:
+					# Remove card from hand
+					hand.erase(card)
+
+					# Reposition remaining cards
+					reposition_hand()
+
+					# Animate card to discard pile
+					await animate_card_to_discard(card)
+
+					# Add to discard pile with deployed info so it can be drawn again
+					var card_data = {
+						"name": card.card_name,
+						"cost": card.cost,
+						"description": card.description,
+						"type": card.card_type,
+						"deployed_instance_id": card.deployed_instance_id,
+						"is_deployed": true
+					}
+					discard_pile.append(card_data)
+
+					# Remove from UI
+					card.queue_free()
 
 				# Execute ship ability based on type
-				if card.card_type == "corvette":
+				if card.card_type in ["corvette", "activate_corvette"]:
 					# Corvette ability: shuffle a Torpedo into the deck
 					if card_database.has("torpedo"):
 						var torpedo_card = card_database["torpedo"].duplicate()
@@ -268,13 +337,21 @@ func _on_card_played(card: Card):
 						draw_pile.shuffle()
 						show_notification("%s %s fired! Torpedo shuffled into deck!" % [card.card_name, card.ship_position])
 					else:
-						show_notification("%s %s discarded!" % [card.card_name, card.ship_position])
+						show_notification("%s %s activated!" % [card.card_name, card.ship_position])
+				elif card.card_type == "activate_fighter":
+					# Fighter ability: next attack deals 3 additional damage
+					# TODO: Implement damage buff system
+					show_notification("%s %s empowers next attack! (+3 damage)" % [card.card_name, card.ship_position])
 				else:
-					# Scout, Fighter, Interceptor: dodge ability
+					# Scout, Interceptor: dodge ability
 					show_notification("%s %s dodges! Ship evades enemy attacks this turn." % [card.card_name, card.ship_position])
 
 				# Update UI
 				update_ui()
+
+				# If card stays in hand, reposition after effect
+				if not should_discard:
+					reposition_hand()
 			else:
 				# First time deploying this card - pay energy and deploy
 				energy -= card.cost
@@ -298,6 +375,12 @@ func _on_card_played(card: Card):
 
 			# Remove card from hand
 			hand.erase(card)
+
+			# Reposition remaining cards
+			reposition_hand()
+
+			# Animate card to discard pile
+			await animate_card_to_discard(card)
 
 			# Add to discard pile
 			var card_data = {
@@ -375,6 +458,56 @@ func execute_card_effect(card: Card):
 			enemy_hp = max(0, enemy_hp)
 			show_notification("Torpedo dealt 10 damage!")
 
+		"tactical_command":
+			# Find all attack cards in hand
+			draw_card()
+			draw_card()
+			show_notification("Drew 2 cards!")
+			var attack_cards = []
+			for hand_card in hand:
+				var is_attack = hand_card.card_type in ["scout_attack", "corvette_attack", "interceptor_attack", "fighter_attack", "torpedo"]
+				if is_attack:
+					attack_cards.append(hand_card)
+
+			if attack_cards.size() > 0:
+				# Randomly select an attack card
+				var selected_card = attack_cards[randi() % attack_cards.size()]
+
+				# Create card data for display
+				var card_data = {
+					"name": selected_card.card_name,
+					"cost": selected_card.cost,
+					"description": selected_card.description,
+					"type": selected_card.card_type
+				}
+				if selected_card.source_ship_id != "":
+					card_data["source_ship_id"] = selected_card.source_ship_id
+
+				# Show in display zone
+				await show_card_in_display_zone(card_data, "tactical_command")
+
+				# Execute the attack card effect without cost
+				await execute_card_effect(selected_card)
+
+				# Remove from hand
+				hand.erase(selected_card)
+
+				# Add to discard pile
+				discard_pile.append(card_data)
+
+				# Remove from UI
+				selected_card.queue_free()
+
+				show_notification("Tactical Command played %s for free!" % selected_card.card_name)
+
+				# Draw 2 cards
+			
+			else:
+				show_notification("No attack cards in hand to command!")
+
+				# Still draw 2 cards even if no attack available
+				
+
 		"shields_up":
 			var ships_buffed = 0
 			var deployed_count = 0
@@ -441,8 +574,18 @@ func deploy_ship_from_card(ship_type: String):
 	card_instance_counter += 1
 	var card_instance_id = "card_%d" % card_instance_counter
 
-	# Setup the deployed card with modified name
-	deployed_card.setup(ship_data, card_instance_id)
+	# Check if there's a separate activate card type for deployed version
+	var activate_type = "activate_%s" % ship_type
+	var deployed_card_data = ship_data.duplicate()
+	if card_database.has(activate_type):
+		# Use the activate card's description and type
+		var activate_data = card_database[activate_type]
+		deployed_card_data["description"] = activate_data["description"]
+		deployed_card_data["type"] = activate_data["type"]
+		# Keep the original name and stats from ship_data
+
+	# Setup the deployed card with modified data
+	deployed_card.setup(deployed_card_data, card_instance_id)
 	deployed_card.card_played.connect(_on_card_played)
 
 	# Mark as deployed and add position
@@ -450,17 +593,18 @@ func deploy_ship_from_card(ship_type: String):
 	deployed_card.deployed_instance_id = instance_id
 	deployed_card.ship_position = position
 
-	# Update description based on ship type
-	if ship_type == "corvette":
-		deployed_card.description = "Discard to shuffle a Torpedo into your deck."
-	else:
-		# Scout, Fighter, Interceptor get dodge ability
-		deployed_card.description = "Discard to dodge enemy attacks this turn."
-
+	# Description from CSV will be displayed with (deployed) replaced by position
 	deployed_card.update_card_display()
 
 	# Add to hand
 	hand.append(deployed_card)
+
+	# Connect hover signals for deployed card
+	deployed_card.mouse_entered.connect(_on_card_hover_start.bind(deployed_card))
+	deployed_card.mouse_exited.connect(_on_card_hover_end.bind(deployed_card))
+
+	# Position cards in hand
+	reposition_hand(false)  # No animation for immediate positioning
 
 	# Mark ship as deployed with its stats and type
 	deployed_ships[instance_id] = {
@@ -487,11 +631,10 @@ func deploy_ship_from_card(ship_type: String):
 	if ship_to_attack.has(ship_type):
 		var attack_type = ship_to_attack[ship_type]
 		if card_database.has(attack_type):
-			# Add attack card directly to hand with ship link
+			# Add attack card via display zone (will be added to hand after display)
 			var attack_card = card_database[attack_type].duplicate()
 			attack_card["source_ship_id"] = instance_id  # Link to the ship that created this attack
-			create_card_in_hand(attack_card)
-			show_notification("Added %s to hand!" % attack_card["name"])
+			add_card_to_hand_with_display(attack_card, "attack_card")
 
 	# Create ship sprite
 	create_ship_sprite(ship_type, position, instance_id)
@@ -541,9 +684,11 @@ func _on_end_turn_pressed():
 			discard_pile.append(card_data)
 			cards_to_remove.append(card)
 
-	# Remove non-deployed cards from hand and UI
+	# Remove non-deployed cards from hand and UI with animation
 	for card in cards_to_remove:
 		hand.erase(card)
+		reposition_hand()
+		await animate_card_to_discard(card)
 		card.queue_free()
 
 	print("Kept ", hand.size(), " deployed ships in hand for enemy turn")
@@ -848,7 +993,94 @@ func update_deployed_ships_ui():
 		deployed_ships_list.add_child(ship_container)
 
 func _on_to_starmap():
+	# Save combat state before leaving
+	save_combat_state()
 	get_tree().change_scene_to_file("res://scenes/StarMap.tscn")
+
+func _on_deck_builder():
+	# Save combat state before leaving
+	save_combat_state()
+	get_tree().change_scene_to_file("res://scenes/DeckBuilder.tscn")
+
+func save_combat_state():
+	# Save all card data from hand
+	var hand_data: Array[Dictionary] = []
+	for card in hand:
+		var card_dict = {
+			"name": card.card_name,
+			"cost": card.cost,
+			"description": card.description,
+			"type": card.card_type,
+			"armor": card.armor,
+			"shield": card.shield,
+			"is_deployed": card.is_deployed,
+			"deployed_instance_id": card.deployed_instance_id,
+			"ship_position": card.ship_position,
+			"source_ship_id": card.source_ship_id,
+			"card_instance_id": card.card_instance_id
+		}
+		hand_data.append(card_dict)
+
+	var state = {
+		"player_hp": player_hp,
+		"player_max_hp": player_max_hp,
+		"player_block": player_block,
+		"enemy_hp": enemy_hp,
+		"enemy_max_hp": enemy_max_hp,
+		"energy": energy,
+		"max_energy": max_energy,
+		"draw_pile": draw_pile.duplicate(true),
+		"hand": hand_data,
+		"discard_pile": discard_pile.duplicate(true),
+		"deployed_ships": deployed_ships.duplicate(true),
+		"next_position_index": next_position_index,
+		"card_instance_counter": card_instance_counter,
+		"card_to_deployed_ship": card_to_deployed_ship.duplicate(true),
+		"notification_history": notification_history.duplicate(true)
+	}
+
+	GameData.save_combat_state(state)
+
+func restore_combat_state():
+	var state = GameData.get_combat_state()
+
+	# Restore basic stats
+	player_hp = state.get("player_hp", 30)
+	player_max_hp = state.get("player_max_hp", 30)
+	player_block = state.get("player_block", 0)
+	enemy_hp = state.get("enemy_hp", 25)
+	enemy_max_hp = state.get("enemy_max_hp", 25)
+	energy = state.get("energy", 3)
+	max_energy = state.get("max_energy", 3)
+
+	# Restore card piles
+	draw_pile = state.get("draw_pile", []).duplicate(true)
+	discard_pile = state.get("discard_pile", []).duplicate(true)
+
+	# Restore deployed ships data
+	deployed_ships = state.get("deployed_ships", {}).duplicate(true)
+	next_position_index = state.get("next_position_index", 0)
+	card_instance_counter = state.get("card_instance_counter", 0)
+	card_to_deployed_ship = state.get("card_to_deployed_ship", {}).duplicate(true)
+
+	# Restore notification history
+	notification_history = state.get("notification_history", []).duplicate(true)
+
+	# Restore hand
+	var hand_data = state.get("hand", [])
+	for card_dict in hand_data:
+		create_card_in_hand(card_dict)
+
+	# Recreate ship sprites for deployed ships
+	for ship_id in deployed_ships.keys():
+		var ship_data = deployed_ships[ship_id]
+		var ship_type = ship_data["ship_type"]
+		var position_name = ship_data["position"]
+		create_ship_sprite(ship_type, position_name, ship_id)
+
+	# Update UI
+	update_deployed_ships_ui()
+	print("Combat state restored successfully")
 
 func show_notification(message: String):
 	# Add message to queue
@@ -918,3 +1150,202 @@ func update_notification_display():
 
 	# Show help text only when there's history
 	notification_help_label.visible = notification_history.size() > 1
+
+func reposition_hand(animate: bool = true):
+	if hand.is_empty():
+		return
+
+	var num_cards = hand.size()
+	var container_width = hand_container.size.x
+	var container_height = hand_container.size.y
+
+	# Calculate dynamic spacing based on hand size
+	var spacing = MAX_CARD_SPACING
+	if num_cards > 1:
+		var total_width_needed = CARD_WIDTH + (num_cards - 1) * MAX_CARD_SPACING
+		if total_width_needed > container_width:
+			# Need to compress spacing
+			spacing = (container_width - CARD_WIDTH) / (num_cards - 1)
+			spacing = max(spacing, MIN_CARD_SPACING)
+
+	# Calculate total width of hand
+	var total_width = CARD_WIDTH + (num_cards - 1) * spacing
+	var start_x = (container_width - total_width) / 2
+
+	# Position each card
+	for i in range(num_cards):
+		var card = hand[i]
+		if card == hovered_card:
+			continue  # Skip hovered card, it has special positioning
+
+		var target_x = start_x + i * spacing
+		var target_y = (container_height - card.size.y) / 2
+
+		# Set z_index for layering (later cards on top)
+		card.z_index = i
+
+		if animate:
+			# Smooth animation to new position
+			var tween = create_tween()
+			tween.set_trans(Tween.TRANS_CUBIC)
+			tween.set_ease(Tween.EASE_OUT)
+			tween.tween_property(card, "position", Vector2(target_x, target_y), 0.2)
+		else:
+			card.position = Vector2(target_x, target_y)
+
+func _on_card_hover_start(card: Card):
+	if card.is_dragging:
+		return
+
+	hovered_card = card
+
+	# Bring to front
+	card.z_index = 1000
+
+	# Calculate lifted position
+	var num_cards = hand.size()
+	var container_width = hand_container.size.x
+	var container_height = hand_container.size.y
+
+	var spacing = MAX_CARD_SPACING
+	if num_cards > 1:
+		var total_width_needed = CARD_WIDTH + (num_cards - 1) * MAX_CARD_SPACING
+		if total_width_needed > container_width:
+			spacing = (container_width - CARD_WIDTH) / (num_cards - 1)
+			spacing = max(spacing, MIN_CARD_SPACING)
+
+	var total_width = CARD_WIDTH + (num_cards - 1) * spacing
+	var start_x = (container_width - total_width) / 2
+	var card_index = hand.find(card)
+
+	var target_x = start_x + card_index * spacing
+	var target_y = (container_height - card.size.y) / 2 - HOVER_LIFT
+
+	# Animate lift
+	var tween = create_tween()
+	tween.set_trans(Tween.TRANS_CUBIC)
+	tween.set_ease(Tween.EASE_OUT)
+	tween.tween_property(card, "position", Vector2(target_x, target_y), 0.15)
+
+func _on_card_hover_end(card: Card):
+	if card.is_dragging:
+		return
+
+	if hovered_card == card:
+		hovered_card = null
+
+	# Reposition back to normal
+	reposition_hand(true)
+
+func show_overflow_card(card_data: Dictionary):
+	# Queue overflow card for display
+	queue_card_display(card_data, "overflow")
+
+func animate_card_to_discard(card: Card):
+	# Animate card flying to discard pile zone
+	var card_start_pos = card.global_position
+
+	# Calculate target position (center of discard zone)
+	var discard_global_pos = discard_pile_zone.global_position
+	var discard_size = discard_pile_zone.size
+	var target_pos = discard_global_pos + discard_size / 2 - card.size / 2
+
+	# Bring card to front
+	card.z_index = 500
+
+	# Create animation tween
+	var tween = create_tween()
+	tween.set_parallel(true)
+	tween.set_trans(Tween.TRANS_CUBIC)
+	tween.set_ease(Tween.EASE_IN)
+
+	# Move to discard pile
+	tween.tween_property(card, "global_position", target_pos, 0.4)
+
+	# Shrink as it flies
+	tween.tween_property(card, "scale", Vector2(0.5, 0.5), 0.4)
+
+	# Fade out near the end
+	tween.chain().tween_property(card, "modulate:a", 0.0, 0.1)
+
+	await tween.finished
+
+func queue_card_display(card_data: Dictionary, display_type: String = "normal"):
+	# Add card to display queue
+	display_queue.append({
+		"card_data": card_data,
+		"display_type": display_type  # "normal", "overflow", "tactical_command", etc.
+	})
+
+	# Start processing queue if not already displaying
+	if not is_displaying_card:
+		process_display_queue()
+
+func process_display_queue():
+	if display_queue.is_empty():
+		is_displaying_card = false
+		return
+
+	is_displaying_card = true
+	var queue_item = display_queue.pop_front()
+
+	# Show the card in display zone
+	await show_card_in_display_zone(queue_item["card_data"], queue_item["display_type"])
+
+	# Check if card should be added to hand after display
+	if queue_item.get("add_to_hand", false):
+		create_card_in_hand(queue_item["card_data"])
+		# Show notification that card was added to hand
+		if queue_item["display_type"] == "attack_card":
+			show_notification("Added %s to hand!" % queue_item["card_data"]["name"])
+
+	# Wait before next card (shorter since card is already in hand now)
+	await get_tree().create_timer(0.3).timeout
+
+	# Process next card in queue
+	process_display_queue()
+
+func show_card_in_display_zone(card_data: Dictionary, display_type: String):
+	# Create card instance
+	var card_instance = CardScene.instantiate()
+	card_display_zone.add_child(card_instance)
+
+	# Setup card
+	card_instance.setup(card_data, "display_temp")
+
+	# Position in center of display zone
+	var zone_size = card_display_zone.size
+	var card_pos = Vector2(
+		(zone_size.x - card_instance.size.x) / 2,
+		(zone_size.y - card_instance.size.y) / 2 + 10  # +10 to account for label
+	)
+	card_instance.position = card_pos
+	card_instance.z_index = 1000
+
+	# Apply visual effects based on display type
+	match display_type:
+		"overflow":
+			card_instance.modulate = Color(1.5, 0.5, 0.5)  # Red tint
+		"tactical_command":
+			card_instance.modulate = Color(1.5, 1.5, 0.8)  # Golden tint
+		"attack_card":
+			card_instance.modulate = Color(0.8, 1.2, 1.5)  # Blue tint
+		_:
+			card_instance.modulate = Color(1.2, 1.2, 1.2)  # Slight highlight
+
+	# Fade in
+	card_instance.modulate.a = 0.0
+	var fade_in = create_tween()
+	fade_in.tween_property(card_instance, "modulate:a", card_instance.modulate.a + 1.0, 0.2)
+	await fade_in.finished
+
+	# Wait for display duration (0.6 seconds)
+	await get_tree().create_timer(0.6).timeout
+
+	# Fade out
+	var fade_out = create_tween()
+	fade_out.tween_property(card_instance, "modulate:a", 0.0, 0.2)
+	await fade_out.finished
+
+	# Remove card
+	card_instance.queue_free()

@@ -26,6 +26,7 @@ var stars: Array[Star] = []
 @onready var clear_button: Button = $UI/ClearButton
 @onready var to_combat_button: Button = $UI/ToCombatButton
 @onready var refresh_button: Button = $UI/RefreshButton
+@onready var deck_builder_button: Button = $UI/DeckBuilderButton
 
 func _ready():
 	# Check if we have saved starmap data
@@ -38,6 +39,7 @@ func _ready():
 	clear_button.pressed.connect(_on_clear_current)
 	to_combat_button.pressed.connect(_on_to_combat)
 	refresh_button.pressed.connect(_on_refresh_starmap)
+	deck_builder_button.pressed.connect(_on_deck_builder)
 
 	# Connect temp line drawing
 	temp_line_layer.draw.connect(_on_temp_line_draw)
@@ -220,6 +222,9 @@ func _on_clear_current():
 
 func _on_to_combat():
 	get_tree().change_scene_to_file("res://scenes/Combat.tscn")
+
+func _on_deck_builder():
+	get_tree().change_scene_to_file("res://scenes/DeckBuilder.tscn")
 
 func redraw_temp_constellation():
 	temp_line_layer.queue_redraw()
