@@ -2,6 +2,19 @@ extends Control
 
 class_name Card
 
+# Artwork preloads
+const ScoutTexture = preload("res://assets/sprites/scout.svg")
+const CorvetteTexture = preload("res://assets/sprites/corvette.svg")
+const InterceptorTexture = preload("res://assets/sprites/interceptor.svg")
+const FighterTexture = preload("res://assets/sprites/fighter.svg")
+const ScoutAttackTexture = preload("res://assets/sprites/scout_attack.svg")
+const CorvetteAttackTexture = preload("res://assets/sprites/corvette_attack.svg")
+const InterceptorAttackTexture = preload("res://assets/sprites/interceptor_attack.svg")
+const FighterAttackTexture = preload("res://assets/sprites/fighter_attack.svg")
+const TorpedoTexture = preload("res://assets/sprites/torpedo.svg")
+const ShieldsUpTexture = preload("res://assets/sprites/shields_up.svg")
+const TacticalCommandTexture = preload("res://assets/sprites/tactical_command.svg")
+
 # Card data
 var card_name: String = ""
 var cost: int = 0
@@ -23,6 +36,7 @@ var source_ship_id: String = ""  # ID of the ship that created this attack card
 @onready var description_label: Label = $Panel/MarginContainer/VBoxContainer/DescriptionLabel
 @onready var deployed_indicator: Label = null  # Will be created dynamically
 @onready var stats_label: Label = null  # Will be created dynamically
+var artwork_texture: TextureRect = null  # Will be created dynamically
 
 # Card state
 var is_dragging: bool = false
@@ -30,12 +44,15 @@ var original_position: Vector2
 var can_play: bool = true
 var original_panel_style: StyleBox = null
 var is_in_play_area: bool = false
+var hovered_enemy_index: int = -1  # Track which enemy is being hovered
 
-signal card_played(card: Card)
+signal card_played(card: Card, target_enemy_index: int)
+signal enemy_hover_changed(enemy_index: int)
 
 func _ready():
 	create_deployed_indicator()
 	create_stats_label()
+	create_artwork_texture()
 	update_card_display()
 	# Store original panel style
 	if panel and panel.get_theme_stylebox("panel"):
@@ -65,6 +82,21 @@ func create_stats_label():
 	# Position it at the bottom of the card
 	stats_label.position = Vector2(10, 155)
 	add_child(stats_label)
+
+func create_artwork_texture():
+	# Create a TextureRect for displaying card artwork
+	artwork_texture = TextureRect.new()
+	artwork_texture.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
+	artwork_texture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	artwork_texture.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	# Make it fill the artwork area
+	artwork_texture.anchor_left = 0
+	artwork_texture.anchor_top = 0
+	artwork_texture.anchor_right = 1
+	artwork_texture.anchor_bottom = 1
+
+	artwork_area.add_child(artwork_texture)
 
 func setup(card_data: Dictionary, instance_id: String = ""):
 	card_name = card_data.get("name", "")
@@ -115,6 +147,35 @@ func update_card_display():
 		else:
 			stats_label.visible = false
 
+	# Load appropriate artwork based on card type
+	if artwork_texture:
+		var texture_to_load: Texture2D = null
+		match card_type:
+			"scout", "activate_scout":
+				texture_to_load = ScoutTexture
+			"corvette", "activate_corvette":
+				texture_to_load = CorvetteTexture
+			"interceptor", "activate_interceptor":
+				texture_to_load = InterceptorTexture
+			"fighter", "activate_fighter":
+				texture_to_load = FighterTexture
+			"scout_attack":
+				texture_to_load = ScoutAttackTexture
+			"corvette_attack":
+				texture_to_load = CorvetteAttackTexture
+			"interceptor_attack":
+				texture_to_load = InterceptorAttackTexture
+			"fighter_attack":
+				texture_to_load = FighterAttackTexture
+			"torpedo":
+				texture_to_load = TorpedoTexture
+			"shields_up":
+				texture_to_load = ShieldsUpTexture
+			"tactical_command":
+				texture_to_load = TacticalCommandTexture
+
+		artwork_texture.texture = texture_to_load
+
 func resize_name_to_fit():
 	if not name_label:
 		return
@@ -154,10 +215,16 @@ func _gui_input(event):
 				is_in_play_area = false
 				reset_drag_visual()
 
+				# Emit that we're no longer hovering any enemy
+				if hovered_enemy_index != -1:
+					enemy_hover_changed.emit(-1)
+					hovered_enemy_index = -1
+
 				# Check if dropped in enemy area (upper portion of screen)
 				var viewport_height = get_viewport_rect().size.y
 				if can_play and global_position.y < viewport_height * 0.5:
-					card_played.emit(self)
+					# Emit with target enemy index (or -1 for auto-target)
+					card_played.emit(self, hovered_enemy_index)
 				else:
 					# Smoothly slide back to original position
 					var tween = create_tween()
@@ -177,6 +244,19 @@ func _process(_delta):
 		if in_play_area != is_in_play_area:
 			is_in_play_area = in_play_area
 			update_drag_visual()
+
+		# Check if hovering over an enemy (only for attack cards)
+		if card_type in ["scout_attack", "corvette_attack", "interceptor_attack", "fighter_attack", "torpedo", "strike"]:
+			# Get Combat scene to check enemy positions
+			var combat = get_tree().root.get_node_or_null("Combat")
+			if combat and combat.has_method("get_enemy_at_position"):
+				var mouse_pos = get_global_mouse_position()
+				var enemy_index = combat.get_enemy_at_position(mouse_pos)
+
+				# If hovered enemy changed, emit signal
+				if enemy_index != hovered_enemy_index:
+					hovered_enemy_index = enemy_index
+					enemy_hover_changed.emit(enemy_index)
 
 func update_drag_visual():
 	if not panel:

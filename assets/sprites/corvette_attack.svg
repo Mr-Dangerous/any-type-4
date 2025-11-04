@@ -1,0 +1,22 @@
+<svg width="100" height="60" xmlns="http://www.w3.org/2000/svg">
+  <!-- Pixel art heavy cannon blast -->
+  <rect width="100" height="60" fill="#1a1a2e"/>
+
+  <!-- Cannon barrel -->
+  <rect x="5" y="24" width="25" height="12" fill="#4a4a5e"/>
+  <rect x="8" y="27" width="20" height="6" fill="#6a6a7e"/>
+
+  <!-- Muzzle flash -->
+  <polygon points="30,24 42,18 42,42 30,36" fill="#ff6600"/>
+  <polygon points="42,20 54,16 54,44 42,40" fill="#ffaa00"/>
+  <polygon points="54,22 66,20 66,40 54,38" fill="#ffff00"/>
+
+  <!-- Energy bolts -->
+  <circle cx="75" cy="26" r="4" fill="#ffff00"/>
+  <circle cx="85" cy="30" r="3" fill="#ffaa00"/>
+  <circle cx="90" cy="34" r="2" fill="#ff6600"/>
+
+  <!-- Impact sparks -->
+  <line x1="75" y1="26" x2="78" y2="20" stroke="#ffff00" stroke-width="2"/>
+  <line x1="75" y1="26" x2="78" y2="32" stroke="#ffff00" stroke-width="2"/>
+</svg>

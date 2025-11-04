@@ -52,57 +52,81 @@ offset_top = 150.0
 offset_right = 220.0
 offset_bottom = 380.0
 
-[node name="Background" type="ColorRect" parent="UI/CardDisplayZone"]
+[node name="PlayerInfo" type="Control" parent="UI"]
+layout_mode = 3
+anchors_preset = 0
+offset_left = 20.0
+offset_top = 20.0
+offset_right = 320.0
+offset_bottom = 140.0
+
+[node name="HPBarBackground" type="ColorRect" parent="UI/PlayerInfo"]
+layout_mode = 0
+offset_right = 250.0
+offset_bottom = 25.0
+color = Color(0.2, 0.2, 0.2, 1)
+
+[node name="ArmorBar" type="ColorRect" parent="UI/PlayerInfo/HPBarBackground"]
 layout_mode = 1
-anchors_preset = 15
+anchors_preset = -1
+anchor_right = 0.833
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.7, 0.7, 0.7, 1)
+
+[node name="ShieldBar" type="ColorRect" parent="UI/PlayerInfo/HPBarBackground"]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.833
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-color = Color(0.15, 0.15, 0.25, 0.5)
+color = Color(0.3, 0.6, 1, 1)
 
-[node name="Label" type="Label" parent="UI/CardDisplayZone"]
+[node name="HPLabel" type="Label" parent="UI/PlayerInfo/HPBarBackground"]
 layout_mode = 1
-anchors_preset = 5
+anchors_preset = 8
 anchor_left = 0.5
+anchor_top = 0.5
 anchor_right = 0.5
+anchor_bottom = 0.5
 offset_left = -50.0
-offset_top = 10.0
+offset_top = -12.0
 offset_right = 50.0
-offset_bottom = 35.0
+offset_bottom = 12.0
 grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 2
 theme_override_font_sizes/font_size = 14
-text = "Card Display"
+text = "50/10"
 horizontal_alignment = 1
+vertical_alignment = 1
 
-[node name="PlayerInfo" type="VBoxContainer" parent="UI"]
-offset_left = 50.0
-offset_top = 450.0
-offset_right = 250.0
-offset_bottom = 550.0
+[node name="EnergyIcon1" type="ColorRect" parent="UI/PlayerInfo"]
+layout_mode = 0
+offset_top = 30.0
+offset_right = 40.0
+offset_bottom = 70.0
+color = Color(0.3, 0.6, 1, 1)
 
-[node name="PlayerLabel" type="Label" parent="UI/PlayerInfo"]
-layout_mode = 2
-theme_override_font_sizes/font_size = 20
-text = "Player"
+[node name="EnergyIcon2" type="ColorRect" parent="UI/PlayerInfo"]
+layout_mode = 0
+offset_left = 48.0
+offset_top = 30.0
+offset_right = 88.0
+offset_bottom = 70.0
+color = Color(0.3, 0.6, 1, 1)
 
-[node name="PlayerHPLabel" type="Label" parent="UI/PlayerInfo"]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.3, 1, 0.3, 1)
-theme_override_font_sizes/font_size = 18
-text = "HP: 30/30"
-
-[node name="EnergyLabel" type="Label" parent="UI/PlayerInfo"]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.3, 0.6, 1, 1)
-theme_override_font_sizes/font_size = 18
-text = "Energy: 3/3"
-
-[node name="BlockLabel" type="Label" parent="UI/PlayerInfo"]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.8, 0.8, 0.3, 1)
-theme_override_font_sizes/font_size = 16
-text = "Block: None"
+[node name="EnergyIcon3" type="ColorRect" parent="UI/PlayerInfo"]
+layout_mode = 0
+offset_left = 96.0
+offset_top = 30.0
+offset_right = 136.0
+offset_bottom = 70.0
+color = Color(0.3, 0.6, 1, 1)
 
 [node name="HandContainer" type="Control" parent="UI"]
 layout_mode = 3
@@ -144,29 +168,6 @@ offset_top = 450.0
 offset_right = 1100.0
 offset_bottom = 630.0
 
-[node name="Background" type="ColorRect" parent="UI/DiscardPileZone"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-color = Color(0.2, 0.15, 0.15, 0.5)
-
-[node name="Label" type="Label" parent="UI/DiscardPileZone"]
-layout_mode = 1
-anchors_preset = 5
-anchor_left = 0.5
-anchor_right = 0.5
-offset_left = -35.0
-offset_top = 5.0
-offset_right = 35.0
-offset_bottom = 25.0
-grow_horizontal = 2
-theme_override_font_sizes/font_size = 14
-text = "Discard"
-horizontal_alignment = 1
-
 [node name="ToStarMapButton" type="Button" parent="UI"]
 offset_left = 920.0
 offset_top = 30.0
@@ -182,22 +183,6 @@ offset_right = 900.0
 offset_bottom = 70.0
 theme_override_font_sizes/font_size = 16
 text = "Deck Builder"
-
-[node name="DeployedShips" type="VBoxContainer" parent="UI"]
-offset_left = 920.0
-offset_top = 220.0
-offset_right = 1100.0
-offset_bottom = 500.0
-theme_override_constants/separation = 5
-
-[node name="DeployedLabel" type="Label" parent="UI/DeployedShips"]
-layout_mode = 2
-theme_override_font_sizes/font_size = 18
-text = "Deployed Ships:"
-
-[node name="ShipsList" type="VBoxContainer" parent="UI/DeployedShips"]
-layout_mode = 2
-theme_override_constants/separation = 3
 
 [node name="PreviousNotificationLabel" type="Label" parent="UI"]
 offset_left = 300.0
@@ -239,5 +224,3 @@ theme_override_font_sizes/font_size = 12
 text = "↑↓ to scroll history"
 horizontal_alignment = 1
 vertical_alignment = 1
-
-[node name="ShipsContainer" type="Node2D" parent="UI"]

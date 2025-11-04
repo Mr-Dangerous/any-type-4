@@ -9,13 +9,22 @@ const FighterTexture = preload("res://assets/sprites/fighter.svg")
 const CorvetteTexture = preload("res://assets/sprites/corvette.svg")
 const InterceptorTexture = preload("res://assets/sprites/interceptor.svg")
 
+# Preload enemy textures
+const SlimeTexture = preload("res://assets/sprites/slime.svg")
+# Uncomment after restarting Godot so it imports the SVG:
+# const TentacleHorrorTexture = preload("res://assets/sprites/tentacle_horror.svg")
+
 # Game state
-var player_hp: int = 30
-var player_max_hp: int = 30
+var player_armor: int = 50
+var player_max_armor: int = 50
+var player_shield: int = 10
+var player_max_shield: int = 10
 var player_block: int = 0
 
-var enemy_hp: int = 25
-var enemy_max_hp: int = 25
+# Enemy data
+var enemy_database: Dictionary = {}
+var enemies: Array[Dictionary] = []  # Array of enemy instances
+# Each enemy has: name, hp, max_hp, attack_index, intent
 
 var energy: int = 3
 var max_energy: int = 3
@@ -32,6 +41,12 @@ var deployed_ships: Dictionary = {}
 # Position names for deployed ships
 var position_names: Array[String] = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel", "India", "Juliet", "Kilo", "Lima", "Mike"]
 
+# Ship line positioning
+const FRONT_LINE_X: float = 250.0
+const BACK_LINE_X: float = 50.0
+const SHIP_START_Y: float = 150.0
+const SHIP_VERTICAL_SPACING: float = 145.0
+
 # Track next available position index
 var next_position_index: int = 0
 
@@ -42,9 +57,12 @@ var card_instance_counter: int = 0
 var card_to_deployed_ship: Dictionary = {}
 
 # UI nodes
-@onready var player_hp_label: Label = $UI/PlayerInfo/PlayerHPLabel
-@onready var enemy_hp_label: Label = $UI/EnemyInfo/EnemyHPLabel
-@onready var energy_label: Label = $UI/PlayerInfo/EnergyLabel
+@onready var player_hp_label: Label = $UI/PlayerInfo/HPBarBackground/HPLabel
+@onready var player_armor_bar: ColorRect = $UI/PlayerInfo/HPBarBackground/ArmorBar
+@onready var player_shield_bar: ColorRect = $UI/PlayerInfo/HPBarBackground/ShieldBar
+@onready var energy_icon_1: ColorRect = $UI/PlayerInfo/EnergyIcon1
+@onready var energy_icon_2: ColorRect = $UI/PlayerInfo/EnergyIcon2
+@onready var energy_icon_3: ColorRect = $UI/PlayerInfo/EnergyIcon3
 @onready var hand_container: Control = $UI/HandContainer
 @onready var card_display_zone: Control = $UI/CardDisplayZone
 @onready var discard_pile_zone: Control = $UI/DiscardPileZone
@@ -61,19 +79,19 @@ var hovered_card: Card = null
 # Card display zone queue
 var display_queue: Array[Dictionary] = []
 var is_displaying_card: bool = false
+
+# Targeting system
+var hovered_enemy_index: int = -1  # -1 means no enemy hovered
+var targeted_enemy_index: int = -1  # -1 means auto-target first alive
 @onready var end_turn_button: Button = $UI/EndTurnButton
 @onready var draw_pile_label: Label = $UI/PileInfo/DrawPileLabel
 @onready var discard_pile_label: Label = $UI/PileInfo/DiscardPileLabel
-@onready var player_block_label: Label = $UI/PlayerInfo/BlockLabel
 @onready var to_starmap_button: Button = $UI/ToStarMapButton
 @onready var deck_builder_button: Button = $UI/DeckBuilderButton
-@onready var deployed_ships_list: VBoxContainer = $UI/DeployedShips/ShipsList
 @onready var notification_label: Label = $UI/NotificationLabel
 @onready var previous_notification_label: Label = $UI/PreviousNotificationLabel
 @onready var next_notification_label: Label = $UI/NextNotificationLabel
 @onready var notification_help_label: Label = $UI/NotificationHelpLabel
-@onready var slime_sprite: TextureRect = $UI/SlimeSprite
-@onready var ships_container: Node2D = $UI/ShipsContainer
 
 # Notification system
 var notification_queue: Array[String] = []
@@ -95,6 +113,19 @@ var ship_to_attack = {
 func _ready():
 	# Load cards from CSV
 	load_cards_from_csv("res://card_database/any_type_4_card_database.csv")
+
+	# Load enemies from CSV
+	load_enemies_from_csv("res://card_database/enemies.csv")
+
+	# Initialize enemies (spawn 2 Slimes for testing)
+	spawn_enemies(["Slime", "Slime"])
+
+	# Debug: Check if energy icons loaded
+	print("Energy icon 1: ", energy_icon_1)
+	print("Energy icon 2: ", energy_icon_2)
+	print("Energy icon 3: ", energy_icon_3)
+	print("Armor bar: ", player_armor_bar)
+	print("Shield bar: ", player_shield_bar)
 
 	# Connect buttons
 	end_turn_button.pressed.connect(_on_end_turn_pressed)
@@ -169,6 +200,180 @@ func load_cards_from_csv(file_path: String) -> bool:
 	print("Loaded ", card_database.size(), " cards from CSV")
 	return true
 
+func load_enemies_from_csv(file_path: String) -> bool:
+	var file = FileAccess.open(file_path, FileAccess.READ)
+	if file == null:
+		print("Failed to open enemies CSV file: ", file_path)
+		return false
+
+	# Read header line
+	var header = file.get_csv_line()
+	if header.size() < 5:
+		print("Invalid enemies CSV format - expected at least 5 columns")
+		file.close()
+		return false
+
+	# Parse each line
+	while not file.eof_reached():
+		var line = file.get_csv_line()
+		if line.size() >= 5 and line[0] != "":
+			var enemy_data = {
+				"name": line[0],
+				"hp": int(line[1]),
+				"attack1": int(line[2]),
+				"attack2": int(line[3]),
+				"attack3": int(line[4])
+			}
+			# Use name as key for easy lookup
+			enemy_database[line[0]] = enemy_data
+
+	file.close()
+	print("Loaded ", enemy_database.size(), " enemies from CSV")
+	return true
+
+func spawn_enemies(enemy_names: Array):
+	enemies.clear()
+
+	for enemy_name in enemy_names:
+		if not enemy_database.has(enemy_name):
+			print("Error: Enemy not found: ", enemy_name)
+			continue
+
+		var enemy_data = enemy_database[enemy_name].duplicate()
+		var enemy_instance = {
+			"name": enemy_name,
+			"hp": enemy_data["hp"],
+			"max_hp": enemy_data["hp"],
+			"attack_index": 0,
+			"intent": "Attack",  # For now, always attack
+			"attack1": enemy_data["attack1"],
+			"attack2": enemy_data["attack2"],
+			"attack3": enemy_data["attack3"]
+		}
+		enemies.append(enemy_instance)
+
+	# Create enemy UI elements
+	create_enemy_ui()
+
+	print("Spawned ", enemies.size(), " enemies")
+
+func create_enemy_ui():
+	# Remove old enemy UI
+	var old_enemy_info = $UI/EnemyInfo
+	if old_enemy_info:
+		old_enemy_info.queue_free()
+	var old_slime_sprite = $UI/SlimeSprite
+	if old_slime_sprite:
+		old_slime_sprite.queue_free()
+
+	# Create container for all enemies (vertical on right side)
+	var enemies_container = VBoxContainer.new()
+	enemies_container.name = "EnemiesContainer"
+	enemies_container.position = Vector2(750, 150)
+	enemies_container.add_theme_constant_override("separation", 20)
+	$UI.add_child(enemies_container)
+
+	# Create UI for each enemy
+	for i in range(enemies.size()):
+		var enemy = enemies[i]
+		var enemy_vbox = VBoxContainer.new()
+		enemy_vbox.name = "Enemy%d" % i
+		enemy_vbox.custom_minimum_size = Vector2(150, 180)
+
+		# Enemy sprite container with crosshair overlay
+		var sprite_container = Control.new()
+		sprite_container.name = "SpriteContainer"
+		sprite_container.custom_minimum_size = Vector2(100, 100)
+
+		var sprite = TextureRect.new()
+		sprite.name = "Sprite"
+		sprite.size = Vector2(100, 100)
+		sprite.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
+		sprite.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		match enemy["name"]:
+			"Slime":
+				sprite.texture = SlimeTexture
+		sprite_container.add_child(sprite)
+
+		# Crosshair targeting indicator (hidden by default)
+		var crosshair = Label.new()
+		crosshair.name = "Crosshair"
+		crosshair.text = "✖"  # Crosshair character
+		crosshair.add_theme_color_override("font_color", Color(1, 0, 0, 1))  # Red
+		crosshair.add_theme_font_size_override("font_size", 48)
+		crosshair.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		crosshair.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		crosshair.size = Vector2(100, 100)
+		crosshair.visible = false
+		crosshair.z_index = 10
+		sprite_container.add_child(crosshair)
+
+		enemy_vbox.add_child(sprite_container)
+
+		# Enemy name label
+		var name_label = Label.new()
+		name_label.name = "NameLabel"
+		name_label.text = enemy["name"]
+		name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		name_label.add_theme_font_size_override("font_size", 16)
+		enemy_vbox.add_child(name_label)
+
+		# HP label
+		var hp_label = Label.new()
+		hp_label.name = "HPLabel"
+		hp_label.text = "HP: %d/%d" % [enemy["hp"], enemy["max_hp"]]
+		hp_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		hp_label.add_theme_color_override("font_color", Color(1, 0.3, 0.3, 1))
+		hp_label.add_theme_font_size_override("font_size", 14)
+		enemy_vbox.add_child(hp_label)
+
+		# Intent label
+		var intent_label = Label.new()
+		intent_label.name = "IntentLabel"
+		intent_label.text = "Intent: %s" % enemy["intent"]
+		intent_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		intent_label.add_theme_color_override("font_color", Color(1, 1, 0.3, 1))
+		intent_label.add_theme_font_size_override("font_size", 12)
+		enemy_vbox.add_child(intent_label)
+
+		enemies_container.add_child(enemy_vbox)
+
+	print("Created UI for ", enemies.size(), " enemies")
+
+func update_enemy_crosshairs():
+	# Update crosshair visibility for all enemies
+	var enemies_container = $UI.get_node_or_null("EnemiesContainer")
+	if not enemies_container:
+		return
+
+	for i in range(enemies.size()):
+		var enemy_vbox = enemies_container.get_node_or_null("Enemy%d" % i)
+		if enemy_vbox:
+			var sprite_container = enemy_vbox.get_node_or_null("SpriteContainer")
+			if sprite_container:
+				var crosshair = sprite_container.get_node_or_null("Crosshair")
+				if crosshair:
+					crosshair.visible = (i == hovered_enemy_index)
+
+func get_enemy_at_position(pos: Vector2) -> int:
+	# Check which enemy is at the given global position
+	# Returns enemy index or -1 if none
+	var enemies_container = $UI.get_node_or_null("EnemiesContainer")
+	if not enemies_container:
+		return -1
+
+	for i in range(enemies.size()):
+		if enemies[i]["hp"] <= 0:
+			continue  # Skip dead enemies
+
+		var enemy_vbox = enemies_container.get_node_or_null("Enemy%d" % i)
+		if enemy_vbox:
+			var rect = Rect2(enemy_vbox.global_position, enemy_vbox.size)
+			if rect.has_point(pos):
+				return i
+
+	return -1
+
 func initialize_deck():
 	# Load starting deck from CSV
 	var file = FileAccess.open("res://card_database/starting_deck.csv", FileAccess.READ)
@@ -240,6 +445,7 @@ func create_card_in_hand(card_data: Dictionary):
 
 	card_instance.setup(card_data, instance_id)
 	card_instance.card_played.connect(_on_card_played)
+	card_instance.enemy_hover_changed.connect(_on_enemy_hover_changed)
 
 	# Check if this card is a deployed ship that needs to be reconnected
 	if card_data.has("is_deployed") and card_data["is_deployed"]:
@@ -259,6 +465,9 @@ func create_card_in_hand(card_data: Dictionary):
 			# Update the mapping
 			card_to_deployed_ship[instance_id] = deployed_instance_id
 			deployed_ships[deployed_instance_id]["card_instance_id"] = instance_id
+
+			# Move ship back to front line (now in hand)
+			move_ship_to_line(deployed_instance_id, true)
 
 			card_instance.update_card_display()
 
@@ -283,7 +492,15 @@ func add_card_to_hand_with_display(card_data: Dictionary, display_type: String =
 	if not is_displaying_card:
 		process_display_queue()
 
-func _on_card_played(card: Card):
+func _on_enemy_hover_changed(enemy_index: int):
+	# Update which enemy is being hovered for crosshair display
+	hovered_enemy_index = enemy_index
+	update_enemy_crosshairs()
+
+func _on_card_played(card: Card, target_enemy_index: int):
+	# Store targeted enemy for this card play
+	targeted_enemy_index = target_enemy_index
+
 	if energy >= card.cost:
 		# Check if this is a ship card (including activate versions)
 		var is_ship = card.card_type in ["scout", "corvette", "interceptor", "fighter", "activate_scout", "activate_corvette", "activate_interceptor", "activate_fighter"]
@@ -400,8 +617,8 @@ func _on_card_played(card: Card):
 			# Update UI
 			update_ui()
 
-			# Check if enemy is dead
-			check_enemy_death()
+			# Check if all enemies are dead
+			check_all_enemies_dead()
 	else:
 		# Not enough energy, return card to original position
 		print("Not enough energy!")
@@ -414,9 +631,7 @@ func execute_card_effect(card: Card):
 				await play_ship_attack_animation(card.source_ship_id)
 
 			# Scout attack - 3 damage
-			enemy_hp -= 3
-			enemy_hp = max(0, enemy_hp)
-			show_notification("Scout attack dealt 3 damage!")
+			damage_enemy(3, targeted_enemy_index)
 
 		"corvette_attack":
 			# Play attack animation if ship exists
@@ -424,9 +639,7 @@ func execute_card_effect(card: Card):
 				await play_ship_attack_animation(card.source_ship_id)
 
 			# Corvette attack - 5 damage
-			enemy_hp -= 5
-			enemy_hp = max(0, enemy_hp)
-			show_notification("Corvette attack dealt 5 damage!")
+			damage_enemy(5, targeted_enemy_index)
 
 		"interceptor_attack":
 			# Play attack animation if ship exists
@@ -434,9 +647,7 @@ func execute_card_effect(card: Card):
 				await play_ship_attack_animation(card.source_ship_id)
 
 			# Interceptor attack - 4 damage
-			enemy_hp -= 4
-			enemy_hp = max(0, enemy_hp)
-			show_notification("Interceptor attack dealt 4 damage!")
+			damage_enemy(4, targeted_enemy_index)
 
 		"fighter_attack":
 			# Play attack animation if ship exists
@@ -444,9 +655,7 @@ func execute_card_effect(card: Card):
 				await play_ship_attack_animation(card.source_ship_id)
 
 			# Fighter attack - 7 damage
-			enemy_hp -= 7
-			enemy_hp = max(0, enemy_hp)
-			show_notification("Fighter attack dealt 7 damage!")
+			damage_enemy(7, targeted_enemy_index)
 
 		"torpedo":
 			# Play attack animation if ship exists
@@ -454,9 +663,7 @@ func execute_card_effect(card: Card):
 				await play_ship_attack_animation(card.source_ship_id)
 
 			# Torpedo - 10 damage
-			enemy_hp -= 10
-			enemy_hp = max(0, enemy_hp)
-			show_notification("Torpedo dealt 10 damage!")
+			damage_enemy(10, targeted_enemy_index)
 
 		"tactical_command":
 			# Find all attack cards in hand
@@ -538,9 +745,7 @@ func execute_card_effect(card: Card):
 
 		"strike":
 			# Deal 5 damage to enemy (keeping for compatibility)
-			enemy_hp -= 5
-			enemy_hp = max(0, enemy_hp)
-			show_notification("Dealt 5 damage to enemy!")
+			damage_enemy(5, targeted_enemy_index)
 
 		"defend":
 			# Add block (reduces next attack by half)
@@ -587,6 +792,7 @@ func deploy_ship_from_card(ship_type: String):
 	# Setup the deployed card with modified data
 	deployed_card.setup(deployed_card_data, card_instance_id)
 	deployed_card.card_played.connect(_on_card_played)
+	deployed_card.enemy_hover_changed.connect(_on_enemy_hover_changed)
 
 	# Mark as deployed and add position
 	deployed_card.is_deployed = true
@@ -613,7 +819,8 @@ func deploy_ship_from_card(ship_type: String):
 		"name": ship_data["name"],
 		"armor": ship_data.get("armor", 0),
 		"shield": ship_data.get("shield", 0),
-		"card_instance_id": card_instance_id  # Link to the new card
+		"card_instance_id": card_instance_id,  # Link to the new card
+		"is_front_line": true  # Ships start at front line when deployed
 	}
 
 	# Link card to deployed ship
@@ -643,8 +850,32 @@ func deploy_ship_from_card(ship_type: String):
 	update_deployed_ships_ui()
 
 func create_ship_sprite(ship_type: String, position_name: String, instance_id: String):
+	# Get or create ships container on left side
+	var ships_node = $UI.get_node_or_null("ShipsContainer")
+	if not ships_node:
+		ships_node = Node2D.new()
+		ships_node.name = "ShipsContainer"
+		$UI.add_child(ships_node)
+
+	# Calculate vertical position based on number of ships
+	var ship_index = deployed_ships.keys().find(instance_id)
+	if ship_index == -1:
+		ship_index = deployed_ships.size()
+
+	# Create a container for this ship (sprite + health bar)
+	var ship_container = Control.new()
+	ship_container.name = instance_id
+	ship_container.custom_minimum_size = Vector2(150, 130)
+
+	# Position based on whether ship is in front line or back line
+	var ship_data = deployed_ships.get(instance_id, {})
+	var is_front_line = ship_data.get("is_front_line", true)
+	var x_pos = FRONT_LINE_X if is_front_line else BACK_LINE_X
+	ship_container.position = Vector2(x_pos, SHIP_START_Y + (ship_index * SHIP_VERTICAL_SPACING))
+
 	# Create sprite
 	var sprite = TextureRect.new()
+	sprite.name = "Sprite"
 
 	# Set texture based on ship type
 	match ship_type:
@@ -657,17 +888,86 @@ func create_ship_sprite(ship_type: String, position_name: String, instance_id: S
 		"interceptor":
 			sprite.texture = InterceptorTexture
 
-	sprite.name = instance_id
-	sprite.custom_minimum_size = Vector2(80, 80)
+	sprite.custom_minimum_size = Vector2(100, 100)
 	sprite.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
 	sprite.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 
-	# Position underneath enemy (slime is at y=200-400, so position at y=420)
-	var x_offset = 350 + ((next_position_index - 1) * 90)
-	var y_offset = 420
-	sprite.position = Vector2(x_offset, y_offset)
+	ship_container.add_child(sprite)
 
-	ships_container.add_child(sprite)
+	# Create health bar container
+	var health_container = Control.new()
+	health_container.name = "HealthBar"
+	health_container.custom_minimum_size = Vector2(120, 20)
+
+	# Health bar background
+	var hp_bg = ColorRect.new()
+	hp_bg.name = "Background"
+	hp_bg.color = Color(0.2, 0.2, 0.2, 1)
+	hp_bg.size = Vector2(120, 20)
+	health_container.add_child(hp_bg)
+
+	# Get ship stats (ship_data already declared earlier in function)
+	var armor = ship_data.get("armor", 0)
+	var shield = ship_data.get("shield", 0)
+	var total_hp = armor + shield
+
+	# Armor bar (gray)
+	var armor_bar = ColorRect.new()
+	armor_bar.name = "ArmorBar"
+	armor_bar.color = Color(0.7, 0.7, 0.7, 1)
+	if total_hp > 0:
+		var armor_width = 120.0 * (float(armor) / float(total_hp))
+		armor_bar.size = Vector2(armor_width, 20)
+	health_container.add_child(armor_bar)
+
+	# Shield bar (blue)
+	var shield_bar = ColorRect.new()
+	shield_bar.name = "ShieldBar"
+	shield_bar.color = Color(0.3, 0.6, 1, 1)
+	if total_hp > 0:
+		var armor_width = 120.0 * (float(armor) / float(total_hp))
+		shield_bar.position = Vector2(armor_width, 0)
+		shield_bar.size = Vector2(120.0 - armor_width, 20)
+	health_container.add_child(shield_bar)
+
+	# HP text label
+	var hp_label = Label.new()
+	hp_label.name = "HPLabel"
+	hp_label.text = "%d/%d" % [total_hp, armor]
+	hp_label.size = Vector2(120, 20)
+	hp_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hp_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	hp_label.add_theme_color_override("font_color", Color(1, 1, 1, 1))
+	hp_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 1))
+	hp_label.add_theme_constant_override("outline_size", 2)
+	hp_label.add_theme_font_size_override("font_size", 12)
+	health_container.add_child(hp_label)
+
+	ship_container.add_child(health_container)
+	ships_node.add_child(ship_container)
+
+func move_ship_to_line(instance_id: String, to_front_line: bool):
+	# Move a ship to front line or back line with animation
+	var ships_node = $UI.get_node_or_null("ShipsContainer")
+	if not ships_node:
+		return
+
+	var ship_container = ships_node.get_node_or_null(instance_id)
+	if not ship_container:
+		return
+
+	# Update ship data
+	if deployed_ships.has(instance_id):
+		deployed_ships[instance_id]["is_front_line"] = to_front_line
+
+	# Calculate target x position
+	var target_x = FRONT_LINE_X if to_front_line else BACK_LINE_X
+
+	# Animate to new position
+	var tween = create_tween()
+	tween.set_trans(Tween.TRANS_CUBIC)
+	tween.set_ease(Tween.EASE_IN_OUT)
+	tween.tween_property(ship_container, "position:x", target_x, 0.5)
 
 func _on_end_turn_pressed():
 	# Discard only non-deployed cards from hand
@@ -697,12 +997,12 @@ func _on_end_turn_pressed():
 	enemy_turn()
 
 	# Check if player is dead
-	if player_hp <= 0:
+	if player_armor <= 0 and player_shield <= 0:
 		print("You died!")
 		get_tree().reload_current_scene()
 		return
 
-	# After enemy turn, discard all remaining deployed ships
+	# After enemy turn, discard all remaining deployed ships and move them to back line
 	cards_to_remove.clear()
 	for card in hand:
 		if card.is_deployed:
@@ -718,6 +1018,13 @@ func _on_end_turn_pressed():
 			discard_pile.append(card_data)
 			cards_to_remove.append(card)
 
+			# Move ship to back line (no longer in hand)
+			if card.deployed_instance_id != "":
+				move_ship_to_line(card.deployed_instance_id, false)
+
+	# Wait for ship animations to complete
+	await get_tree().create_timer(0.5).timeout
+
 	# Remove deployed ships from hand and UI
 	for card in cards_to_remove:
 		hand.erase(card)
@@ -729,31 +1036,52 @@ func _on_end_turn_pressed():
 	start_turn()
 
 func play_slime_attack_animation():
-	# Store original position
-	var original_pos = slime_sprite.position
-
-	# Create tween for attack animation
-	var tween = create_tween()
-	tween.set_trans(Tween.TRANS_QUAD)
-	tween.set_ease(Tween.EASE_IN_OUT)
-
-	# Move forward (attack)
-	tween.tween_property(slime_sprite, "position", original_pos + Vector2(0, 50), 0.2)
-	# Move back (return)
-	tween.tween_property(slime_sprite, "position", original_pos, 0.2)
+	# TODO: Update for multi-enemy system
+	# Animation disabled for now
+	pass
 
 func play_ship_attack_animation(source_ship_id: String):
-	# Find the ship sprite
-	var ship_sprite = ships_container.get_node_or_null(source_ship_id)
+	# Find the ship container
+	var ships_vbox = $UI.get_node_or_null("ShipsContainer")
+	if not ships_vbox:
+		print("Warning: Ships container not found")
+		return
+
+	var ship_container = ships_vbox.get_node_or_null(source_ship_id)
+	if not ship_container:
+		print("Warning: Ship container not found for attack animation: ", source_ship_id)
+		return
+
+	var ship_sprite = ship_container.get_node_or_null("Sprite")
 	if not ship_sprite:
 		print("Warning: Ship sprite not found for attack animation: ", source_ship_id)
+		return
+
+	# Find the first alive enemy sprite
+	var enemies_container = $UI.get_node_or_null("EnemiesContainer")
+	if not enemies_container:
+		print("Warning: Enemies container not found")
+		return
+
+	var target_enemy_sprite = null
+	var target_enemy_index = -1
+	for i in range(enemies.size()):
+		if enemies[i]["hp"] > 0:
+			var enemy_vbox = enemies_container.get_node_or_null("Enemy%d" % i)
+			if enemy_vbox:
+				target_enemy_sprite = enemy_vbox.get_node_or_null("Sprite")
+				target_enemy_index = i
+				break
+
+	if not target_enemy_sprite:
+		print("Warning: No alive enemy sprite found for attack animation")
 		return
 
 	# Get ship center position in global coordinates
 	var ship_center = ship_sprite.global_position + ship_sprite.size / 2
 
 	# Get enemy center position
-	var enemy_center = slime_sprite.global_position + slime_sprite.size / 2
+	var enemy_center = target_enemy_sprite.global_position + target_enemy_sprite.size / 2
 
 	# Calculate angle to enemy
 	var direction = enemy_center - ship_center
@@ -783,11 +1111,11 @@ func play_ship_attack_animation(source_ship_id: String):
 	bullet.queue_free()
 
 	# Flash enemy
-	var original_modulate = slime_sprite.modulate
+	var original_modulate = target_enemy_sprite.modulate
 	for i in range(3):
-		slime_sprite.modulate = Color(2.0, 2.0, 2.0)  # Bright flash
+		target_enemy_sprite.modulate = Color(2.0, 2.0, 2.0)  # Bright flash
 		await get_tree().create_timer(0.05).timeout
-		slime_sprite.modulate = original_modulate
+		target_enemy_sprite.modulate = original_modulate
 		await get_tree().create_timer(0.05).timeout
 
 	# Rotate ship back to original position
@@ -795,85 +1123,142 @@ func play_ship_attack_animation(source_ship_id: String):
 	return_tween.tween_property(ship_sprite, "rotation", original_rotation, 0.15)
 
 func enemy_turn():
-	var base_damage = 10
+	# Process each enemy from left to right
+	for enemy_index in range(enemies.size()):
+		var enemy = enemies[enemy_index]
 
-	# Get all deployed ships in hand
-	var deployed_ships_in_hand = []
-	for card in hand:
-		if card.is_deployed:
-			deployed_ships_in_hand.append(card)
+		# Get damage from attack pattern
+		var attacks = [enemy["attack1"], enemy["attack2"], enemy["attack3"]]
+		var base_damage = attacks[enemy["attack_index"]]
 
-	# Target selection: ships first, then player
-	if deployed_ships_in_hand.size() > 0:
-		# Randomly select a deployed ship to attack
-		var target_card = deployed_ships_in_hand[randi() % deployed_ships_in_hand.size()]
-		var ship_instance_id = target_card.deployed_instance_id
+		# Cycle to next attack
+		enemy["attack_index"] = (enemy["attack_index"] + 1) % 3
 
-		if deployed_ships.has(ship_instance_id):
-			var ship_data = deployed_ships[ship_instance_id]
-			show_notification("Enemy attacks %s %s!" % [ship_data["name"], ship_data["position"]])
+		show_notification("%s attacks for %d damage!" % [enemy["name"], base_damage])
 
-			# Apply damage to ship (shield first, then armor)
-			var remaining_damage = base_damage
-			var original_shield = ship_data["shield"]
-			var original_armor = ship_data["armor"]
+		# Get all deployed ships, prioritizing front line
+		var front_line_ships = []
+		var back_line_ships = []
 
-			# Damage shield first
-			if ship_data["shield"] > 0:
-				var shield_damage = min(ship_data["shield"], remaining_damage)
-				ship_data["shield"] -= shield_damage
-				remaining_damage -= shield_damage
-				show_notification("Shield absorbed %d damage (%d -> %d)" % [shield_damage, original_shield, ship_data["shield"]])
-
-			# Then damage armor
-			if remaining_damage > 0 and ship_data["armor"] > 0:
-				var armor_damage = min(ship_data["armor"], remaining_damage)
-				ship_data["armor"] -= armor_damage
-				remaining_damage -= armor_damage
-				show_notification("Armor absorbed %d damage (%d -> %d)" % [armor_damage, original_armor, ship_data["armor"]])
-
-			# Check if ship is destroyed
-			if ship_data["shield"] <= 0 and ship_data["armor"] <= 0:
-				show_notification("%s %s destroyed!" % [ship_data["name"], ship_data["position"]])
-
-				# Remove all attack cards from this ship
-				remove_attack_cards_for_ship(ship_instance_id)
-
-				# Remove ship from deployed list
-				deployed_ships.erase(ship_instance_id)
-				card_to_deployed_ship.erase(target_card.card_instance_id)
-				# Remove card from hand
-				hand.erase(target_card)
-				target_card.queue_free()
-				# Remove ship sprite
-				var ship_sprite = ships_container.get_node_or_null(ship_instance_id)
-				if ship_sprite:
-					ship_sprite.queue_free()
-				# Update UI
-				update_deployed_ships_ui()
+		for instance_id in deployed_ships.keys():
+			var ship_data = deployed_ships[instance_id]
+			if ship_data.get("is_front_line", false):
+				front_line_ships.append(instance_id)
 			else:
-				# Ship survives - update card display with new stats
-				target_card.armor = ship_data["armor"]
-				target_card.shield = ship_data["shield"]
-				target_card.update_card_display()
-				# Update deployed ships UI
-				update_deployed_ships_ui()
-	else:
-		# No deployed ships - attack player
-		var damage = base_damage
+				back_line_ships.append(instance_id)
 
-		# Apply block if player has it
-		if player_block > 0:
-			damage = int(damage / 2.0)
-			player_block = 0  # Consume block
-			show_notification("Enemy attack reduced by block!")
+		# Target selection: front line first, then back line, then player
+		var ship_instance_id = ""
+		if front_line_ships.size() > 0:
+			# Attack random front line ship
+			ship_instance_id = front_line_ships[randi() % front_line_ships.size()]
+		elif back_line_ships.size() > 0:
+			# No front line ships, attack random back line ship
+			ship_instance_id = back_line_ships[randi() % back_line_ships.size()]
 
-		player_hp -= damage
-		player_hp = max(0, player_hp)
-		show_notification("Enemy dealt %d damage to player!" % damage)
-	# Play attack animation
-	play_slime_attack_animation()
-	await get_tree().create_timer(0.5).timeout
+		if ship_instance_id != "":
+
+			if deployed_ships.has(ship_instance_id):
+				var ship_data = deployed_ships[ship_instance_id]
+				show_notification("%s attacks %s %s!" % [enemy["name"], ship_data["name"], ship_data["position"]])
+
+				# Apply damage to ship (shield first, then armor)
+				var remaining_damage = base_damage
+				var original_shield = ship_data["shield"]
+				var original_armor = ship_data["armor"]
+
+				# Damage shield first
+				if ship_data["shield"] > 0:
+					var shield_damage = min(ship_data["shield"], remaining_damage)
+					ship_data["shield"] -= shield_damage
+					remaining_damage -= shield_damage
+					show_notification("Shield absorbed %d damage (%d -> %d)" % [shield_damage, original_shield, ship_data["shield"]])
+
+				# Then damage armor
+				if remaining_damage > 0 and ship_data["armor"] > 0:
+					var armor_damage = min(ship_data["armor"], remaining_damage)
+					ship_data["armor"] -= armor_damage
+					remaining_damage -= armor_damage
+					show_notification("Armor absorbed %d damage (%d -> %d)" % [armor_damage, original_armor, ship_data["armor"]])
+
+				# Check if ship is destroyed
+				if ship_data["shield"] <= 0 and ship_data["armor"] <= 0:
+					show_notification("%s %s destroyed!" % [ship_data["name"], ship_data["position"]])
+
+					# Remove all attack cards from this ship
+					remove_attack_cards_for_ship(ship_instance_id)
+
+					# Find and remove card from hand if it exists
+					var card_instance_id = ship_data.get("card_instance_id", "")
+					if card_instance_id != "":
+						for card in hand:
+							if card.card_instance_id == card_instance_id:
+								hand.erase(card)
+								card.queue_free()
+								break
+						card_to_deployed_ship.erase(card_instance_id)
+
+					# Remove ship from deployed list
+					deployed_ships.erase(ship_instance_id)
+
+					# Remove ship container
+					var ships_vbox = $UI.get_node_or_null("ShipsContainer")
+					if ships_vbox:
+						var ship_container = ships_vbox.get_node_or_null(ship_instance_id)
+						if ship_container:
+							ship_container.queue_free()
+					# Update UI
+					update_deployed_ships_ui()
+				else:
+					# Ship survives - update card display with new stats if in hand
+					var card_instance_id = ship_data.get("card_instance_id", "")
+					if card_instance_id != "":
+						for card in hand:
+							if card.card_instance_id == card_instance_id:
+								card.armor = ship_data["armor"]
+								card.shield = ship_data["shield"]
+								card.update_card_display()
+								break
+					# Update deployed ships UI
+					update_deployed_ships_ui()
+		else:
+			# No deployed ships - attack player
+			var damage = base_damage
+
+			# Apply block if player has it
+			if player_block > 0:
+				damage = int(damage / 2.0)
+				player_block = 0  # Consume block
+				show_notification("Enemy attack reduced by block!")
+
+			# Apply damage to shield first, then armor
+			var remaining_damage = damage
+			if player_shield > 0:
+				var shield_damage = min(player_shield, remaining_damage)
+				player_shield -= shield_damage
+				remaining_damage -= shield_damage
+				if shield_damage > 0:
+					show_notification("Shield absorbed %d damage!" % shield_damage)
+
+			if remaining_damage > 0:
+				player_armor -= remaining_damage
+				player_armor = max(0, player_armor)
+				show_notification("Enemy dealt %d damage to armor!" % remaining_damage)
+
+			# Check if player is defeated
+			if player_armor <= 0 and player_shield <= 0:
+				show_notification("You were defeated!")
+				await get_tree().create_timer(2.0).timeout
+				get_tree().reload_current_scene()
+				return
+
+		# Play attack animation for this enemy
+		# TODO: Implement per-enemy attack animations
+		# play_slime_attack_animation()
+		await get_tree().create_timer(0.5).timeout
+		update_ui()
+
+	# After all enemies have attacked
 	update_ui()
 
 func remove_attack_cards_for_ship(ship_instance_id: String):
@@ -910,87 +1295,143 @@ func remove_attack_cards_for_ship(ship_instance_id: String):
 	if removed_count > 0:
 		show_notification("Removed %d attack cards from destroyed ship!" % removed_count)
 
-func check_enemy_death():
-	if enemy_hp <= 0:
-		print("Enemy defeated! Restarting...")
-		await get_tree().create_timer(1.0).timeout
-		get_tree().reload_current_scene()
+func damage_enemy(damage: int, target_index: int = -1):
+	# Attack specific enemy if targeted, otherwise attack first alive
+	var target_enemy_index = -1
+
+	if target_index >= 0 and target_index < enemies.size():
+		# Specific enemy targeted
+		if enemies[target_index]["hp"] > 0:
+			target_enemy_index = target_index
+	else:
+		# Auto-target: find first alive enemy
+		for i in range(enemies.size()):
+			if enemies[i]["hp"] > 0:
+				target_enemy_index = i
+				break
+
+	if target_enemy_index == -1:
+		print("Warning: No alive enemies to damage!")
+		return
+
+	var enemy = enemies[target_enemy_index]
+	enemy["hp"] -= damage
+	enemy["hp"] = max(0, enemy["hp"])
+	show_notification("%s took %d damage!" % [enemy["name"], damage])
+
+	# Check if enemy died
+	if enemy["hp"] <= 0:
+		show_notification("%s defeated!" % enemy["name"])
+
+		# Remove enemy UI
+		var enemies_container = $UI.get_node_or_null("EnemiesContainer")
+		if enemies_container:
+			var enemy_vbox = enemies_container.get_node_or_null("Enemy%d" % target_enemy_index)
+			if enemy_vbox:
+				# Fade out animation
+				var fade_tween = create_tween()
+				fade_tween.tween_property(enemy_vbox, "modulate:a", 0.0, 0.3)
+				await fade_tween.finished
+				enemy_vbox.queue_free()
+
+	update_ui()
+
+func check_all_enemies_dead():
+	# Check if all enemies are defeated
+	for enemy in enemies:
+		if enemy["hp"] > 0:
+			return false
+
+	# All enemies dead
+	print("All enemies defeated! Restarting...")
+	await get_tree().create_timer(1.0).timeout
+	get_tree().reload_current_scene()
+	return true
 
 func update_ui():
-	player_hp_label.text = "HP: " + str(player_hp) + "/" + str(player_max_hp)
-	enemy_hp_label.text = "HP: " + str(enemy_hp) + "/" + str(enemy_max_hp)
-	energy_label.text = "Energy: " + str(energy) + "/" + str(max_energy)
-	draw_pile_label.text = "Draw: " + str(draw_pile.size())
-	discard_pile_label.text = "Discard: " + str(discard_pile.size())
-	player_block_label.text = "Block: " + ("Active" if player_block > 0 else "None")
+	# Update HP label and bars
+	if player_hp_label:
+		player_hp_label.text = str(player_armor) + "/" + str(player_shield)
+
+	# Calculate armor and shield percentages
+	var armor_percentage = float(player_armor) / float(player_max_armor)
+	var shield_percentage = float(player_shield) / float(player_max_shield)
+
+	# Armor takes up 83.3% of the bar (50/60 total), shield takes 16.7% (10/60 total)
+	if player_armor_bar:
+		player_armor_bar.anchor_right = 0.833 * armor_percentage
+	if player_shield_bar:
+		player_shield_bar.anchor_left = 0.833
+		player_shield_bar.anchor_right = 0.833 + (0.167 * shield_percentage)
+
+	# Update enemy UIs
+	var enemies_container = $UI.get_node_or_null("EnemiesContainer")
+	if enemies_container:
+		for i in range(enemies.size()):
+			var enemy = enemies[i]
+			var enemy_vbox = enemies_container.get_node_or_null("Enemy%d" % i)
+			if enemy_vbox:
+				var hp_label = enemy_vbox.get_node_or_null("HPLabel")
+				if hp_label:
+					hp_label.text = "HP: %d/%d" % [enemy["hp"], enemy["max_hp"]]
+				var intent_label = enemy_vbox.get_node_or_null("IntentLabel")
+				if intent_label:
+					intent_label.text = "Intent: %s" % enemy["intent"]
+
+	# Update energy icons (show/hide based on current energy)
+	if energy_icon_1:
+		energy_icon_1.visible = energy >= 1
+		energy_icon_1.modulate.a = 1.0 if energy >= 1 else 0.3
+	if energy_icon_2:
+		energy_icon_2.visible = energy >= 2
+		energy_icon_2.modulate.a = 1.0 if energy >= 2 else 0.3
+	if energy_icon_3:
+		energy_icon_3.visible = energy >= 3
+		energy_icon_3.modulate.a = 1.0 if energy >= 3 else 0.3
+
+	if draw_pile_label:
+		draw_pile_label.text = "Draw: " + str(draw_pile.size())
+	if discard_pile_label:
+		discard_pile_label.text = "Discard: " + str(discard_pile.size())
 
 func update_deployed_ships_ui():
-	# Clear existing ship displays
-	for child in deployed_ships_list.get_children():
-		child.queue_free()
+	# Update health bars for all deployed ships
+	var ships_vbox = $UI.get_node_or_null("ShipsContainer")
+	if not ships_vbox:
+		return
 
-	# Add each deployed ship instance
 	for instance_id in deployed_ships.keys():
 		var ship_data = deployed_ships[instance_id]
+		var ship_container = ships_vbox.get_node_or_null(instance_id)
+		if not ship_container:
+			continue
 
-		# Create container for this ship
-		var ship_container = VBoxContainer.new()
-		ship_container.add_theme_constant_override("separation", 2)
+		var health_container = ship_container.get_node_or_null("HealthBar")
+		if not health_container:
+			continue
 
-		# Ship name label
-		var ship_label = Label.new()
-		ship_label.add_theme_font_size_override("font_size", 14)
-		ship_label.add_theme_color_override("font_color", Color(0.3, 0.7, 1.0))
-		ship_label.text = "◆ %s %s" % [ship_data["name"], ship_data["position"]]
-		ship_container.add_child(ship_label)
+		# Get current stats
+		var armor = ship_data.get("armor", 0)
+		var shield = ship_data.get("shield", 0)
+		var total_hp = armor + shield
 
-		# Health bar container (use Control for manual positioning)
-		var health_bar_container = Control.new()
-		health_bar_container.custom_minimum_size = Vector2(150, 20)
+		# Update armor bar
+		var armor_bar = health_container.get_node_or_null("ArmorBar")
+		if armor_bar and total_hp > 0:
+			var armor_width = 120.0 * (float(armor) / float(total_hp))
+			armor_bar.size = Vector2(armor_width, 20)
 
-		# Background bar
-		var bg_bar = ColorRect.new()
-		bg_bar.color = Color(0.2, 0.2, 0.2, 1.0)
-		bg_bar.size = Vector2(150, 20)
-		bg_bar.position = Vector2(0, 0)
-		health_bar_container.add_child(bg_bar)
+		# Update shield bar
+		var shield_bar = health_container.get_node_or_null("ShieldBar")
+		if shield_bar and total_hp > 0:
+			var armor_width = 120.0 * (float(armor) / float(total_hp))
+			shield_bar.position = Vector2(armor_width, 0)
+			shield_bar.size = Vector2(120.0 - armor_width, 20)
 
-		# Get current stats from card_database for max values
-		var max_armor = card_database[ship_data["ship_type"]]["armor"]
-		var max_shield = card_database[ship_data["ship_type"]]["shield"]
-		var max_total = max_armor + max_shield
-		var current_armor = ship_data["armor"]
-		var current_shield = ship_data["shield"]
-
-		# Calculate bar widths
-		var bar_width = 150.0
-		var armor_width = (float(current_armor) / float(max_total)) * bar_width
-		var shield_width = (float(current_shield) / float(max_total)) * bar_width
-
-		# Armor bar (red) - positioned at start
-		var armor_bar = ColorRect.new()
-		armor_bar.color = Color(0.9, 0.2, 0.2, 1.0)  # Red
-		armor_bar.size = Vector2(armor_width, 20)
-		armor_bar.position = Vector2(0, 0)
-		health_bar_container.add_child(armor_bar)
-
-		# Shield bar (blue) - positioned after armor
-		var shield_bar = ColorRect.new()
-		shield_bar.color = Color(0.2, 0.5, 1.0, 1.0)  # Blue
-		shield_bar.size = Vector2(shield_width, 20)
-		shield_bar.position = Vector2(armor_width, 0)
-		health_bar_container.add_child(shield_bar)
-
-		# Stats text overlay
-		var stats_label = Label.new()
-		stats_label.add_theme_font_size_override("font_size", 11)
-		stats_label.add_theme_color_override("font_color", Color(1, 1, 1, 1))
-		stats_label.text = "A:%d S:%d" % [current_armor, current_shield]
-		stats_label.position = Vector2(5, 2)
-		health_bar_container.add_child(stats_label)
-
-		ship_container.add_child(health_bar_container)
-		deployed_ships_list.add_child(ship_container)
+		# Update HP label
+		var hp_label = health_container.get_node_or_null("HPLabel")
+		if hp_label:
+			hp_label.text = "%d/%d" % [total_hp, armor]
 
 func _on_to_starmap():
 	# Save combat state before leaving
@@ -1022,11 +1463,12 @@ func save_combat_state():
 		hand_data.append(card_dict)
 
 	var state = {
-		"player_hp": player_hp,
-		"player_max_hp": player_max_hp,
+		"player_armor": player_armor,
+		"player_max_armor": player_max_armor,
+		"player_shield": player_shield,
+		"player_max_shield": player_max_shield,
 		"player_block": player_block,
-		"enemy_hp": enemy_hp,
-		"enemy_max_hp": enemy_max_hp,
+		"enemies": enemies.duplicate(true),
 		"energy": energy,
 		"max_energy": max_energy,
 		"draw_pile": draw_pile.duplicate(true),
@@ -1045,13 +1487,18 @@ func restore_combat_state():
 	var state = GameData.get_combat_state()
 
 	# Restore basic stats
-	player_hp = state.get("player_hp", 30)
-	player_max_hp = state.get("player_max_hp", 30)
+	player_armor = state.get("player_armor", 50)
+	player_max_armor = state.get("player_max_armor", 50)
+	player_shield = state.get("player_shield", 10)
+	player_max_shield = state.get("player_max_shield", 10)
 	player_block = state.get("player_block", 0)
-	enemy_hp = state.get("enemy_hp", 25)
-	enemy_max_hp = state.get("enemy_max_hp", 25)
+	enemies = state.get("enemies", []).duplicate(true)
 	energy = state.get("energy", 3)
 	max_energy = state.get("max_energy", 3)
+
+	# Recreate enemy UI after restoring enemies data
+	if enemies.size() > 0:
+		create_enemy_ui()
 
 	# Restore card piles
 	draw_pile = state.get("draw_pile", []).duplicate(true)
