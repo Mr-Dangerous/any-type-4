@@ -467,6 +467,7 @@ The following systems from the original plan are not yet implemented:
    - Ship deployment and idle behavior
    - Camera zoom system
    - Parallax background system
+    ## TODO need to fix background scaling.
 
 2. **StarMap.tscn** (`StarMap.gd`)
    - Basic node-based navigation
