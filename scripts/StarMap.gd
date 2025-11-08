@@ -25,9 +25,11 @@ var prevent_parallel_paths: bool = false  # Disabled by default for stability
 const ANGLE_TOLERANCE: float = 5.0  # Degrees
 
 # Node encounter type spawn rates (0-100, will be normalized)
-var combat_spawn_rate: int = 33
-var treasure_spawn_rate: int = 33
-var mystery_spawn_rate: int = 34
+var combat_spawn_rate: int = 30
+var treasure_spawn_rate: int = 15
+var mystery_spawn_rate: int = 30
+var trading_spawn_rate: int = 15
+var mining_spawn_rate: int = 15
 
 # Stars and network
 var stars: Array[Star] = []
@@ -35,6 +37,7 @@ var network_nodes: Array[Dictionary] = []  # {position: Vector2, connections: Ar
 var home_node_idx: int = -1
 var end_node_idx: int = -1
 var map_width: float = 0.0
+var star_names: Array[String] = []
 
 # Player
 var player_current_node: int = -1
@@ -46,30 +49,52 @@ var is_player_moving: bool = false
 @onready var icon_layer: Node2D = $IconLayer
 @onready var camera: Camera2D = $Camera2D
 @onready var to_combat_button: Button = $UI/ToCombatButton
-@onready var refresh_button: Button = $UI/RefreshButton
 @onready var deck_builder_button: Button = $UI/DeckBuilderButton
-@onready var parallel_path_button: Button = $UI/ParallelPathButton
+@onready var debug_map_button: Button = $UI/DebugMapButton
+@onready var debug_controls: Control = $UI/DebugControls
+@onready var refresh_button: Button = $UI/DebugControls/RefreshButton
+@onready var parallel_path_button: Button = $UI/DebugControls/ParallelPathButton
 
 # Control buttons
-@onready var columns_label: Label = $UI/ColumnsLabel
-@onready var columns_decrease_btn: Button = $UI/ColumnsDecreaseBtn
-@onready var columns_increase_btn: Button = $UI/ColumnsIncreaseBtn
-@onready var min_rows_label: Label = $UI/MinRowsLabel
-@onready var min_rows_decrease_btn: Button = $UI/MinRowsDecreaseBtn
-@onready var min_rows_increase_btn: Button = $UI/MinRowsIncreaseBtn
-@onready var max_rows_label: Label = $UI/MaxRowsLabel
-@onready var max_rows_decrease_btn: Button = $UI/MaxRowsDecreaseBtn
-@onready var max_rows_increase_btn: Button = $UI/MaxRowsIncreaseBtn
-@onready var min_dist_label: Label = $UI/MinDistLabel
-@onready var min_dist_decrease_btn: Button = $UI/MinDistDecreaseBtn
-@onready var min_dist_increase_btn: Button = $UI/MinDistIncreaseBtn
-@onready var max_dist_label: Label = $UI/MaxDistLabel
-@onready var max_dist_decrease_btn: Button = $UI/MaxDistDecreaseBtn
-@onready var max_dist_increase_btn: Button = $UI/MaxDistIncreaseBtn
+@onready var columns_label: Label = $UI/DebugControls/ColumnsLabel
+@onready var columns_decrease_btn: Button = $UI/DebugControls/ColumnsDecreaseBtn
+@onready var columns_increase_btn: Button = $UI/DebugControls/ColumnsIncreaseBtn
+@onready var min_rows_label: Label = $UI/DebugControls/MinRowsLabel
+@onready var min_rows_decrease_btn: Button = $UI/DebugControls/MinRowsDecreaseBtn
+@onready var min_rows_increase_btn: Button = $UI/DebugControls/MinRowsIncreaseBtn
+@onready var max_rows_label: Label = $UI/DebugControls/MaxRowsLabel
+@onready var max_rows_decrease_btn: Button = $UI/DebugControls/MaxRowsDecreaseBtn
+@onready var max_rows_increase_btn: Button = $UI/DebugControls/MaxRowsIncreaseBtn
+@onready var min_dist_label: Label = $UI/DebugControls/MinDistLabel
+@onready var min_dist_decrease_btn: Button = $UI/DebugControls/MinDistDecreaseBtn
+@onready var min_dist_increase_btn: Button = $UI/DebugControls/MinDistIncreaseBtn
+@onready var max_dist_label: Label = $UI/DebugControls/MaxDistLabel
+@onready var max_dist_decrease_btn: Button = $UI/DebugControls/MaxDistDecreaseBtn
+@onready var max_dist_increase_btn: Button = $UI/DebugControls/MaxDistIncreaseBtn
+@onready var combat_rate_label: Label = $UI/DebugControls/CombatRateLabel
+@onready var combat_rate_decrease_btn: Button = $UI/DebugControls/CombatRateDecreaseBtn
+@onready var combat_rate_increase_btn: Button = $UI/DebugControls/CombatRateIncreaseBtn
+@onready var treasure_rate_label: Label = $UI/DebugControls/TreasureRateLabel
+@onready var treasure_rate_decrease_btn: Button = $UI/DebugControls/TreasureRateDecreaseBtn
+@onready var treasure_rate_increase_btn: Button = $UI/DebugControls/TreasureRateIncreaseBtn
+@onready var mystery_rate_label: Label = $UI/DebugControls/MysteryRateLabel
+@onready var mystery_rate_decrease_btn: Button = $UI/DebugControls/MysteryRateDecreaseBtn
+@onready var mystery_rate_increase_btn: Button = $UI/DebugControls/MysteryRateIncreaseBtn
+@onready var trading_rate_label: Label = $UI/DebugControls/TradingRateLabel
+@onready var trading_rate_decrease_btn: Button = $UI/DebugControls/TradingRateDecreaseBtn
+@onready var trading_rate_increase_btn: Button = $UI/DebugControls/TradingRateIncreaseBtn
+@onready var mining_rate_label: Label = $UI/DebugControls/MiningRateLabel
+@onready var mining_rate_decrease_btn: Button = $UI/DebugControls/MiningRateDecreaseBtn
+@onready var mining_rate_increase_btn: Button = $UI/DebugControls/MiningRateIncreaseBtn
+@onready var tooltip_container: Control = $UI/TooltipContainer
+@onready var tooltip_label: Label = $UI/TooltipContainer/TooltipLabel
 
 func _ready():
 	var viewport_size = get_viewport_rect().size
 	map_width = viewport_size.x * MAP_WIDTH_MULTIPLIER
+
+	# Load star names from CSV
+	load_star_names()
 
 	# Setup camera
 	camera.position = Vector2(viewport_size.x / 2, viewport_size.y / 2)
@@ -85,8 +110,9 @@ func _ready():
 		generate_starfield()
 
 	to_combat_button.pressed.connect(_on_to_combat)
-	refresh_button.pressed.connect(_on_refresh_starmap)
 	deck_builder_button.pressed.connect(_on_deck_builder)
+	debug_map_button.pressed.connect(_on_toggle_debug_controls)
+	refresh_button.pressed.connect(_on_refresh_starmap)
 	parallel_path_button.pressed.connect(_on_toggle_parallel_paths)
 
 	update_parallel_path_button()
@@ -102,11 +128,35 @@ func _ready():
 	min_dist_increase_btn.pressed.connect(_on_min_dist_increase)
 	max_dist_decrease_btn.pressed.connect(_on_max_dist_decrease)
 	max_dist_increase_btn.pressed.connect(_on_max_dist_increase)
+	combat_rate_decrease_btn.pressed.connect(_on_combat_rate_decrease)
+	combat_rate_increase_btn.pressed.connect(_on_combat_rate_increase)
+	treasure_rate_decrease_btn.pressed.connect(_on_treasure_rate_decrease)
+	treasure_rate_increase_btn.pressed.connect(_on_treasure_rate_increase)
+	mystery_rate_decrease_btn.pressed.connect(_on_mystery_rate_decrease)
+	mystery_rate_increase_btn.pressed.connect(_on_mystery_rate_increase)
+	trading_rate_decrease_btn.pressed.connect(_on_trading_rate_decrease)
+	trading_rate_increase_btn.pressed.connect(_on_trading_rate_increase)
+	mining_rate_decrease_btn.pressed.connect(_on_mining_rate_decrease)
+	mining_rate_increase_btn.pressed.connect(_on_mining_rate_increase)
 
 	update_control_labels()
 
 func _process(delta):
 	handle_edge_scrolling(delta)
+
+func load_star_names():
+	star_names.clear()
+	var file = FileAccess.open("res://card_database/star_names.csv", FileAccess.READ)
+	if file:
+		var _header = file.get_csv_line()  # Skip header
+		while not file.eof_reached():
+			var line = file.get_csv_line()
+			if line.size() > 0 and line[0] != "":
+				star_names.append(line[0])
+		file.close()
+		print("Loaded ", star_names.size(), " star names")
+	else:
+		print("Failed to load star names CSV")
 
 func generate_starfield():
 	var viewport_size = get_viewport_rect().size
@@ -298,17 +348,28 @@ func generate_network():
 					node_pos = Vector2(column_width * (col + 1), target_y)
 
 			var node_type = "normal"
+			var encounter_type = ""  # Only for normal nodes
 			if col == 0:
 				node_type = "home"
 				home_node_idx = network_nodes.size()
 			elif col == num_columns - 1:
 				node_type = "end"
 				end_node_idx = network_nodes.size()
+			else:
+				# Assign random encounter type for normal nodes
+				encounter_type = get_random_encounter_type()
+
+			# Assign random star name
+			var star_name = "Unknown"
+			if star_names.size() > 0:
+				star_name = star_names[randi() % star_names.size()]
 
 			network_nodes.append({
 				"position": node_pos,
 				"connections": [],
 				"type": node_type,
+				"encounter_type": encounter_type,
+				"star_name": star_name,
 				"column": col,
 				"is_exit": false,
 				"revealed": true,  # All nodes visible by default
@@ -682,6 +743,14 @@ func create_node_icon(node_data: Dictionary, node_idx: int, is_reachable: bool) 
 				_on_node_clicked(node_idx)
 	)
 
+	# Connect hover events for tooltip
+	icon_area.mouse_entered.connect(func():
+		_on_node_hover_start(node_idx, node_data)
+	)
+	icon_area.mouse_exited.connect(func():
+		_on_node_hover_end()
+	)
+
 	# Check if this node has been visited (for exit icon display)
 	var is_visited = node_data.get("visited", false)
 
@@ -711,10 +780,66 @@ func create_node_icon(node_data: Dictionary, node_idx: int, is_reachable: bool) 
 					icon.draw_rect(Rect2(-8, -12, 16, 24), Color(0.1, 0.6, 0.2))
 					icon.draw_circle(Vector2(0, 0), 6, Color(0.3, 1.0, 0.4))
 				else:
-					# Draw treasure chest (for regular nodes or unvisited exits)
-					icon.draw_rect(Rect2(-10, -8, 20, 16), Color(0.7, 0.5, 0.2))
-					icon.draw_line(Vector2(-10, 0), Vector2(10, 0), Color(0.9, 0.8, 0.3), 2.0)
-					icon.draw_rect(Rect2(-3, -3, 6, 6), Color(0.9, 0.8, 0.3))
+					# Draw different icons based on encounter type
+					var encounter_type = node_data.get("encounter_type", "treasure")
+					match encounter_type:
+						"combat":
+							# Draw crossed swords
+							# First sword (top-left to bottom-right)
+							icon.draw_line(Vector2(-8, -8), Vector2(8, 8), Color(0.7, 0.7, 0.8), 3.0)
+							icon.draw_circle(Vector2(-8, -8), 3, Color(0.8, 0.7, 0.3))  # Pommel
+							icon.draw_line(Vector2(-10, -6), Vector2(-6, -10), Color(0.8, 0.7, 0.3), 2.0)  # Guard
+							# Second sword (top-right to bottom-left)
+							icon.draw_line(Vector2(8, -8), Vector2(-8, 8), Color(0.7, 0.7, 0.8), 3.0)
+							icon.draw_circle(Vector2(8, -8), 3, Color(0.8, 0.7, 0.3))  # Pommel
+							icon.draw_line(Vector2(6, -10), Vector2(10, -6), Color(0.8, 0.7, 0.3), 2.0)  # Guard
+						"mystery":
+							# Draw question mark
+							icon.draw_circle(Vector2(0, 0), 15, Color(0.5, 0.3, 0.7, 0.3))
+							icon.draw_arc(Vector2(0, 0), 15, 0, TAU, 32, Color(0.6, 0.4, 0.8), 2.0)
+							# Question mark shape
+							icon.draw_arc(Vector2(0, -6), 5, deg_to_rad(180), deg_to_rad(360), 16, Color(0.8, 0.7, 0.9), 3.0)
+							icon.draw_line(Vector2(0, -1), Vector2(0, 2), Color(0.8, 0.7, 0.9), 3.0)
+							icon.draw_circle(Vector2(0, 6), 2, Color(0.8, 0.7, 0.9))
+						"trading":
+							# Draw trading scales/balance
+							icon.draw_circle(Vector2(0, 0), 15, Color(0.3, 0.6, 0.8, 0.3))
+							icon.draw_arc(Vector2(0, 0), 15, 0, TAU, 32, Color(0.4, 0.7, 0.9), 2.0)
+							# Balance stand
+							icon.draw_line(Vector2(0, -8), Vector2(0, 6), Color(0.7, 0.7, 0.8), 2.0)
+							# Balance beam
+							icon.draw_line(Vector2(-10, -8), Vector2(10, -8), Color(0.8, 0.7, 0.3), 2.0)
+							# Left scale plate
+							icon.draw_line(Vector2(-10, -8), Vector2(-10, -4), Color(0.7, 0.7, 0.8), 1.5)
+							icon.draw_arc(Vector2(-10, -4), 4, 0, PI, 16, Color(0.9, 0.8, 0.3), 2.0)
+							# Right scale plate
+							icon.draw_line(Vector2(10, -8), Vector2(10, -4), Color(0.7, 0.7, 0.8), 1.5)
+							icon.draw_arc(Vector2(10, -4), 4, 0, PI, 16, Color(0.9, 0.8, 0.3), 2.0)
+							# Coins on plates
+							icon.draw_circle(Vector2(-10, -6), 2, Color(0.95, 0.85, 0.3))
+							icon.draw_circle(Vector2(10, -6), 2, Color(0.95, 0.85, 0.3))
+						"mining":
+							# Draw pickaxe and crystal
+							icon.draw_circle(Vector2(0, 0), 15, Color(0.4, 0.3, 0.2, 0.3))
+							icon.draw_arc(Vector2(0, 0), 15, 0, TAU, 32, Color(0.5, 0.4, 0.3), 2.0)
+							# Pickaxe handle
+							icon.draw_line(Vector2(-5, 5), Vector2(8, -8), Color(0.6, 0.4, 0.2), 3.0)
+							# Pickaxe head
+							icon.draw_line(Vector2(8, -8), Vector2(12, -4), Color(0.6, 0.6, 0.7), 3.0)
+							icon.draw_line(Vector2(8, -8), Vector2(4, -12), Color(0.6, 0.6, 0.7), 3.0)
+							# Crystal/ore
+							icon.draw_polygon([Vector2(-8, 4), Vector2(-10, 8), Vector2(-6, 10), Vector2(-4, 6)], [Color(0.4, 0.7, 0.9)])
+							icon.draw_polyline([Vector2(-8, 4), Vector2(-10, 8), Vector2(-6, 10), Vector2(-4, 6), Vector2(-8, 4)], Color(0.3, 0.5, 0.7), 1.5)
+						"treasure":
+							# Draw treasure chest
+							icon.draw_rect(Rect2(-10, -8, 20, 16), Color(0.7, 0.5, 0.2))
+							icon.draw_line(Vector2(-10, 0), Vector2(10, 0), Color(0.9, 0.8, 0.3), 2.0)
+							icon.draw_rect(Rect2(-3, -3, 6, 6), Color(0.9, 0.8, 0.3))
+						_:
+							# Default fallback - treasure chest
+							icon.draw_rect(Rect2(-10, -8, 20, 16), Color(0.7, 0.5, 0.2))
+							icon.draw_line(Vector2(-10, 0), Vector2(10, 0), Color(0.9, 0.8, 0.3), 2.0)
+							icon.draw_rect(Rect2(-3, -3, 6, 6), Color(0.9, 0.8, 0.3))
 	)
 	icon.queue_redraw()
 
@@ -742,6 +867,47 @@ func setup_player():
 		create_node_icons()
 	else:
 		print("ERROR: home_node_idx is invalid!")
+
+func _on_node_hover_start(node_idx: int, node_data: Dictionary):
+	# Get encounter type text
+	var encounter_text = ""
+	match node_data["type"]:
+		"home":
+			encounter_text = "Home Base"
+		"end":
+			encounter_text = "Final Boss"
+		_:
+			# Normal nodes - show encounter type
+			var encounter_type = node_data.get("encounter_type", "unknown")
+			match encounter_type:
+				"combat":
+					encounter_text = "Combat"
+				"treasure":
+					encounter_text = "Treasure"
+				"mystery":
+					encounter_text = "Mystery"
+				"trading":
+					encounter_text = "Trading"
+				"mining":
+					encounter_text = "Mining"
+				_:
+					encounter_text = "Unknown"
+
+	# Get star name
+	var star_name = node_data.get("star_name", "Unknown")
+
+	# Set tooltip text
+	tooltip_label.text = encounter_text + "\n" + star_name
+
+	# Position tooltip above the node
+	var node_screen_pos = node_data["position"] - camera.position + get_viewport_rect().size / 2
+	tooltip_container.position = node_screen_pos + Vector2(-100, -80)  # Center above icon
+
+	# Show tooltip
+	tooltip_container.visible = true
+
+func _on_node_hover_end():
+	tooltip_container.visible = false
 
 func _on_node_clicked(node_idx: int):
 	# Check if this node is connected to current node
@@ -800,6 +966,9 @@ func _on_to_combat():
 
 func _on_deck_builder():
 	get_tree().change_scene_to_file("res://scenes/DeckBuilder.tscn")
+
+func _on_toggle_debug_controls():
+	debug_controls.visible = not debug_controls.visible
 
 func _on_toggle_parallel_paths():
 	prevent_parallel_paths = not prevent_parallel_paths
@@ -876,3 +1045,79 @@ func update_control_labels():
 	max_rows_label.text = "Max Rows: " + str(max_nodes_per_column)
 	min_dist_label.text = "Min Dist: " + str(int(min_node_distance))
 	max_dist_label.text = "Max Dist: " + str(int(max_node_distance))
+	combat_rate_label.text = "Combat: " + str(combat_spawn_rate)
+	treasure_rate_label.text = "Treasure: " + str(treasure_spawn_rate)
+	mystery_rate_label.text = "Mystery: " + str(mystery_spawn_rate)
+	trading_rate_label.text = "Trading: " + str(trading_spawn_rate)
+	mining_rate_label.text = "Mining: " + str(mining_spawn_rate)
+
+func get_random_encounter_type() -> String:
+	# Normalize spawn rates (handle case where total isn't 100)
+	var total = combat_spawn_rate + treasure_spawn_rate + mystery_spawn_rate + trading_spawn_rate + mining_spawn_rate
+	if total == 0:
+		return "treasure"  # Default fallback
+
+	# Generate random number from 0 to total
+	var roll = randi() % total
+
+	# Check which type was rolled
+	if roll < combat_spawn_rate:
+		return "combat"
+	elif roll < combat_spawn_rate + treasure_spawn_rate:
+		return "treasure"
+	elif roll < combat_spawn_rate + treasure_spawn_rate + mystery_spawn_rate:
+		return "mystery"
+	elif roll < combat_spawn_rate + treasure_spawn_rate + mystery_spawn_rate + trading_spawn_rate:
+		return "trading"
+	else:
+		return "mining"
+
+func _on_combat_rate_decrease():
+	combat_spawn_rate = max(0, combat_spawn_rate - 5)
+	update_control_labels()
+	_on_refresh_starmap()
+
+func _on_combat_rate_increase():
+	combat_spawn_rate = min(100, combat_spawn_rate + 5)
+	update_control_labels()
+	_on_refresh_starmap()
+
+func _on_treasure_rate_decrease():
+	treasure_spawn_rate = max(0, treasure_spawn_rate - 5)
+	update_control_labels()
+	_on_refresh_starmap()
+
+func _on_treasure_rate_increase():
+	treasure_spawn_rate = min(100, treasure_spawn_rate + 5)
+	update_control_labels()
+	_on_refresh_starmap()
+
+func _on_mystery_rate_decrease():
+	mystery_spawn_rate = max(0, mystery_spawn_rate - 5)
+	update_control_labels()
+	_on_refresh_starmap()
+
+func _on_mystery_rate_increase():
+	mystery_spawn_rate = min(100, mystery_spawn_rate + 5)
+	update_control_labels()
+	_on_refresh_starmap()
+
+func _on_trading_rate_decrease():
+	trading_spawn_rate = max(0, trading_spawn_rate - 5)
+	update_control_labels()
+	_on_refresh_starmap()
+
+func _on_trading_rate_increase():
+	trading_spawn_rate = min(100, trading_spawn_rate + 5)
+	update_control_labels()
+	_on_refresh_starmap()
+
+func _on_mining_rate_decrease():
+	mining_spawn_rate = max(0, mining_spawn_rate - 5)
+	update_control_labels()
+	_on_refresh_starmap()
+
+func _on_mining_rate_increase():
+	mining_spawn_rate = min(100, mining_spawn_rate + 5)
+	update_control_labels()
+	_on_refresh_starmap()

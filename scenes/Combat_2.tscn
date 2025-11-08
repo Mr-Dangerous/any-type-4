@@ -1,0 +1,22 @@
+[gd_scene load_steps=2 format=3 uid="uid://tqc6i2i2tyng"]
+
+[ext_resource type="Script" uid="uid://s7awonapbij8" path="res://scripts/Combat_2.gd" id="1_combat2"]
+
+[node name="Combat_2" type="Node2D"]
+script = ExtResource("1_combat2")
+
+[node name="Background" type="ColorRect" parent="."]
+z_index = -1
+offset_right = 1152.0
+offset_bottom = 648.0
+color = Color(0.1, 0.1, 0.15, 1)
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="TitleLabel" type="Label" parent="UI"]
+offset_left = 20.0
+offset_top = 20.0
+offset_right = 300.0
+offset_bottom = 60.0
+theme_override_font_sizes/font_size = 24
+text = "TACTICAL VIEW"

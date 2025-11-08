@@ -41,11 +41,19 @@ var deployed_ships: Dictionary = {}
 # Position names for deployed ships
 var position_names: Array[String] = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel", "India", "Juliet", "Kilo", "Lima", "Mike"]
 
-# Ship line positioning
-const FRONT_LINE_X: float = 250.0
-const BACK_LINE_X: float = 50.0
-const SHIP_START_Y: float = 150.0
-const SHIP_VERTICAL_SPACING: float = 145.0
+# Lane positioning (horizontal rectangles)
+const FRONT_LANE_Y: float = 180.0
+const BACK_LANE_Y: float = 280.0
+const LANE_WIDTH: float = 650.0
+const LANE_HEIGHT: float = 64.0
+const LANE_START_X: float = 240.0  # Offset after mothership area
+const SHIP_HORIZONTAL_SPACING: float = 130.0
+const SHIP_START_X_IN_LANE: float = 20.0  # Starting x position within lane
+
+# Camera zoom
+var camera_zoom_target: Vector2 = Vector2(1, 1)
+var camera_offset_target: Vector2 = Vector2.ZERO
+var is_zoomed: bool = false
 
 # Track next available position index
 var next_position_index: int = 0
@@ -111,6 +119,15 @@ var ship_to_attack = {
 }
 
 func _ready():
+	# Create camera
+	var camera = Camera2D.new()
+	camera.name = "Camera"
+	add_child(camera)
+	camera.enabled = true
+
+	# Create lane rectangles
+	create_lane_rectangles()
+
 	# Load cards from CSV
 	load_cards_from_csv("res://card_database/any_type_4_card_database.csv")
 
@@ -145,7 +162,107 @@ func _ready():
 	# Update UI
 	update_ui()
 
+func _process(delta):
+	# Smooth camera zoom and offset
+	var camera = get_node_or_null("Camera")
+	if camera:
+		camera.zoom = camera.zoom.lerp(camera_zoom_target, delta * 5.0)
+		camera.offset = camera.offset.lerp(camera_offset_target, delta * 5.0)
+
+func create_lane_rectangles():
+	# Create lanes container
+	var lanes_container = Node2D.new()
+	lanes_container.name = "LanesContainer"
+	add_child(lanes_container)
+	lanes_container.z_index = -1  # Behind ships
+
+	# Front lane
+	var front_lane = ColorRect.new()
+	front_lane.name = "FrontLane"
+	front_lane.position = Vector2(LANE_START_X, FRONT_LANE_Y)
+	front_lane.size = Vector2(LANE_WIDTH, LANE_HEIGHT)
+	front_lane.color = Color(0.2, 0.4, 0.8, 0.35)  # Semi-transparent blue
+	lanes_container.add_child(front_lane)
+
+	# Add border to front lane
+	var front_border = ReferenceRect.new()
+	front_border.border_color = Color(0.3, 0.5, 1.0, 0.9)
+	front_border.border_width = 3.0
+	front_border.size = front_lane.size
+	front_lane.add_child(front_border)
+
+	# Front lane label
+	var front_label = Label.new()
+	front_label.text = "FRONT LINE"
+	front_label.position = Vector2(10, 22)
+	front_label.add_theme_color_override("font_color", Color(0.8, 0.9, 1.0, 0.8))
+	front_label.add_theme_font_size_override("font_size", 16)
+	front_lane.add_child(front_label)
+
+	# Back lane
+	var back_lane = ColorRect.new()
+	back_lane.name = "BackLane"
+	back_lane.position = Vector2(LANE_START_X, BACK_LANE_Y)
+	back_lane.size = Vector2(LANE_WIDTH, LANE_HEIGHT)
+	back_lane.color = Color(0.2, 0.4, 0.8, 0.35)  # Semi-transparent blue
+	lanes_container.add_child(back_lane)
+
+	# Add border to back lane
+	var back_border = ReferenceRect.new()
+	back_border.border_color = Color(0.3, 0.5, 1.0, 0.9)
+	back_border.border_width = 3.0
+	back_border.size = back_lane.size
+	back_lane.add_child(back_border)
+
+	# Back lane label
+	var back_label = Label.new()
+	back_label.text = "BACK LINE"
+	back_label.position = Vector2(10, 22)
+	back_label.add_theme_color_override("font_color", Color(0.8, 0.9, 1.0, 0.8))
+	back_label.add_theme_font_size_override("font_size", 16)
+	back_lane.add_child(back_label)
+
+	# Make lanes clickable
+	front_lane.mouse_filter = Control.MOUSE_FILTER_STOP
+	back_lane.mouse_filter = Control.MOUSE_FILTER_STOP
+
+	# Connect click signals
+	front_lane.gui_input.connect(_on_lane_clicked.bind("front"))
+	back_lane.gui_input.connect(_on_lane_clicked.bind("back"))
+
+func _on_lane_clicked(event: InputEvent, lane: String):
+	if event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+			toggle_lane_zoom(lane)
+
+func toggle_lane_zoom(lane: String):
+	var camera = get_node_or_null("Camera")
+	if not camera:
+		return
+
+	if is_zoomed:
+		# Zoom out to normal view
+		camera_zoom_target = Vector2(1, 1)
+		camera_offset_target = Vector2.ZERO
+		is_zoomed = false
+	else:
+		# Zoom into selected lane
+		camera_zoom_target = Vector2(1.5, 1.5)
+		var lane_y = FRONT_LANE_Y if lane == "front" else BACK_LANE_Y
+		var lane_center = Vector2(LANE_START_X + LANE_WIDTH / 2, lane_y + LANE_HEIGHT / 2)
+		# Offset camera to center on lane (accounting for screen center)
+		camera_offset_target = lane_center - Vector2(576, 324)  # Half of typical screen size
+		is_zoomed = true
+
 func _input(event):
+	# Escape to zoom out
+	if event.is_action_pressed("ui_cancel"):
+		if is_zoomed:
+			camera_zoom_target = Vector2(1, 1)
+			camera_offset_target = Vector2.ZERO
+			is_zoomed = false
+			get_viewport().set_input_as_handled()
+
 	# Handle notification history navigation
 	if notification_history.size() > 1:
 		if event.is_action_pressed("ui_up"):
@@ -563,6 +680,10 @@ func _on_card_played(card: Card, target_enemy_index: int):
 					# Scout, Interceptor: dodge ability
 					show_notification("%s %s dodges! Ship evades enemy attacks this turn." % [card.card_name, card.ship_position])
 
+					# Move ship to back line
+					if card.deployed_instance_id != "":
+						move_ship_to_line(card.deployed_instance_id, false)
+
 				# Update UI
 				update_ui()
 
@@ -850,28 +971,34 @@ func deploy_ship_from_card(ship_type: String):
 	update_deployed_ships_ui()
 
 func create_ship_sprite(ship_type: String, position_name: String, instance_id: String):
-	# Get or create ships container on left side
-	var ships_node = $UI.get_node_or_null("ShipsContainer")
+	# Get or create ships container
+	var ships_node = get_node_or_null("ShipsContainer")
 	if not ships_node:
 		ships_node = Node2D.new()
 		ships_node.name = "ShipsContainer"
-		$UI.add_child(ships_node)
-
-	# Calculate vertical position based on number of ships
-	var ship_index = deployed_ships.keys().find(instance_id)
-	if ship_index == -1:
-		ship_index = deployed_ships.size()
+		add_child(ships_node)
+		ships_node.z_index = 1  # Above lanes
 
 	# Create a container for this ship (sprite + health bar)
 	var ship_container = Control.new()
 	ship_container.name = instance_id
-	ship_container.custom_minimum_size = Vector2(150, 130)
+	ship_container.custom_minimum_size = Vector2(120, 120)
 
 	# Position based on whether ship is in front line or back line
 	var ship_data = deployed_ships.get(instance_id, {})
 	var is_front_line = ship_data.get("is_front_line", true)
-	var x_pos = FRONT_LINE_X if is_front_line else BACK_LINE_X
-	ship_container.position = Vector2(x_pos, SHIP_START_Y + (ship_index * SHIP_VERTICAL_SPACING))
+
+	# Count ships in the same lane to calculate horizontal position
+	var ships_in_lane = 0
+	for other_id in deployed_ships.keys():
+		var other_ship = deployed_ships[other_id]
+		if other_ship.get("is_front_line", true) == is_front_line:
+			ships_in_lane += 1
+
+	var lane_y = FRONT_LANE_Y if is_front_line else BACK_LANE_Y
+	var x_pos = LANE_START_X + SHIP_START_X_IN_LANE + ((ships_in_lane - 1) * SHIP_HORIZONTAL_SPACING)
+	# Center ship vertically in the 64-pixel lane (sprite is ~100px, so offset to center)
+	ship_container.position = Vector2(x_pos, lane_y - 18)
 
 	# Create sprite
 	var sprite = TextureRect.new()
@@ -948,7 +1075,7 @@ func create_ship_sprite(ship_type: String, position_name: String, instance_id: S
 
 func move_ship_to_line(instance_id: String, to_front_line: bool):
 	# Move a ship to front line or back line with animation
-	var ships_node = $UI.get_node_or_null("ShipsContainer")
+	var ships_node = get_node_or_null("ShipsContainer")
 	if not ships_node:
 		return
 
@@ -960,14 +1087,41 @@ func move_ship_to_line(instance_id: String, to_front_line: bool):
 	if deployed_ships.has(instance_id):
 		deployed_ships[instance_id]["is_front_line"] = to_front_line
 
-	# Calculate target x position
-	var target_x = FRONT_LINE_X if to_front_line else BACK_LINE_X
+	# Recalculate positions for all ships in both lanes
+	reposition_all_ships()
 
-	# Animate to new position
-	var tween = create_tween()
-	tween.set_trans(Tween.TRANS_CUBIC)
-	tween.set_ease(Tween.EASE_IN_OUT)
-	tween.tween_property(ship_container, "position:x", target_x, 0.5)
+func reposition_all_ships():
+	# Reposition all ships to stagger properly in their lanes
+	var ships_node = get_node_or_null("ShipsContainer")
+	if not ships_node:
+		return
+
+	# Count ships per lane and assign positions
+	var front_lane_index = 0
+	var back_lane_index = 0
+
+	for ship_id in deployed_ships.keys():
+		var ship_data = deployed_ships[ship_id]
+		var is_front = ship_data.get("is_front_line", true)
+		var ship_container = ships_node.get_node_or_null(ship_id)
+		if not ship_container:
+			continue
+
+		var lane_y = FRONT_LANE_Y if is_front else BACK_LANE_Y
+		var lane_index = front_lane_index if is_front else back_lane_index
+		var x_pos = LANE_START_X + SHIP_START_X_IN_LANE + (lane_index * SHIP_HORIZONTAL_SPACING)
+
+		# Animate to new position (center vertically in lane)
+		var tween = create_tween()
+		tween.set_trans(Tween.TRANS_CUBIC)
+		tween.set_ease(Tween.EASE_IN_OUT)
+		tween.tween_property(ship_container, "position", Vector2(x_pos, lane_y - 18), 0.5)
+
+		# Increment lane counter
+		if is_front:
+			front_lane_index += 1
+		else:
+			back_lane_index += 1
 
 func _on_end_turn_pressed():
 	# Discard only non-deployed cards from hand
@@ -1035,14 +1189,82 @@ func _on_end_turn_pressed():
 	# Start new turn with fresh hand
 	start_turn()
 
-func play_slime_attack_animation():
-	# TODO: Update for multi-enemy system
-	# Animation disabled for now
-	pass
+func play_enemy_attack_animation(enemy_index: int, target_ship_id: String = ""):
+	# Get enemy sprite
+	var enemies_container = $UI.get_node_or_null("EnemiesContainer")
+	if not enemies_container:
+		print("Warning: Enemies container not found")
+		return
+
+	var enemy_vbox = enemies_container.get_node_or_null("Enemy%d" % enemy_index)
+	if not enemy_vbox:
+		print("Warning: Enemy vbox not found for attack animation")
+		return
+
+	var enemy_sprite_container = enemy_vbox.get_node_or_null("SpriteContainer")
+	if not enemy_sprite_container:
+		print("Warning: Enemy sprite container not found")
+		return
+
+	var enemy_sprite = enemy_sprite_container.get_node_or_null("Sprite")
+	if not enemy_sprite:
+		print("Warning: Enemy sprite not found for attack animation")
+		return
+
+	# Get enemy center position
+	var enemy_center = enemy_sprite.global_position + enemy_sprite.size / 2
+
+	# Determine target position
+	var target_center: Vector2
+	var target_sprite = null
+
+	if target_ship_id != "":
+		# Attacking a ship
+		var ships_node = get_node_or_null("ShipsContainer")
+		if ships_node:
+			var ship_container = ships_node.get_node_or_null(target_ship_id)
+			if ship_container:
+				var ship_sprite = ship_container.get_node_or_null("Sprite")
+				if ship_sprite:
+					target_center = ship_sprite.global_position + ship_sprite.size / 2
+					target_sprite = ship_sprite
+	else:
+		# Attacking player (target player armor/shield bar area)
+		var player_hp_bar = $UI/PlayerInfo/HPBarBackground
+		if player_hp_bar:
+			target_center = player_hp_bar.global_position + player_hp_bar.size / 2
+			target_sprite = player_hp_bar
+
+	if target_sprite == null:
+		print("Warning: No target found for enemy attack animation")
+		return
+
+	# Create bullet (red/purple for enemy)
+	var bullet = ColorRect.new()
+	bullet.color = Color(1.0, 0.2, 0.3)  # Red bullet for enemies
+	bullet.size = Vector2(10, 10)
+	bullet.position = enemy_center - bullet.size / 2
+	get_tree().root.add_child(bullet)
+
+	# Animate bullet to target
+	var bullet_tween = create_tween()
+	bullet_tween.tween_property(bullet, "position", target_center - bullet.size / 2, 0.4)
+	await bullet_tween.finished
+
+	# Remove bullet
+	bullet.queue_free()
+
+	# Flash target
+	var original_modulate = target_sprite.modulate
+	for i in range(3):
+		target_sprite.modulate = Color(2.0, 0.5, 0.5)  # Red flash
+		await get_tree().create_timer(0.05).timeout
+		target_sprite.modulate = original_modulate
+		await get_tree().create_timer(0.05).timeout
 
 func play_ship_attack_animation(source_ship_id: String):
 	# Find the ship container
-	var ships_vbox = $UI.get_node_or_null("ShipsContainer")
+	var ships_vbox = get_node_or_null("ShipsContainer")
 	if not ships_vbox:
 		print("Warning: Ships container not found")
 		return
@@ -1069,9 +1291,12 @@ func play_ship_attack_animation(source_ship_id: String):
 		if enemies[i]["hp"] > 0:
 			var enemy_vbox = enemies_container.get_node_or_null("Enemy%d" % i)
 			if enemy_vbox:
-				target_enemy_sprite = enemy_vbox.get_node_or_null("Sprite")
-				target_enemy_index = i
-				break
+				var sprite_container = enemy_vbox.get_node_or_null("SpriteContainer")
+				if sprite_container:
+					target_enemy_sprite = sprite_container.get_node_or_null("Sprite")
+					if target_enemy_sprite:
+						target_enemy_index = i
+						break
 
 	if not target_enemy_sprite:
 		print("Warning: No alive enemy sprite found for attack animation")
@@ -1162,6 +1387,9 @@ func enemy_turn():
 				var ship_data = deployed_ships[ship_instance_id]
 				show_notification("%s attacks %s %s!" % [enemy["name"], ship_data["name"], ship_data["position"]])
 
+				# Play enemy attack animation
+				await play_enemy_attack_animation(enemy_index, ship_instance_id)
+
 				# Apply damage to ship (shield first, then armor)
 				var remaining_damage = base_damage
 				var original_shield = ship_data["shield"]
@@ -1202,7 +1430,7 @@ func enemy_turn():
 					deployed_ships.erase(ship_instance_id)
 
 					# Remove ship container
-					var ships_vbox = $UI.get_node_or_null("ShipsContainer")
+					var ships_vbox = get_node_or_null("ShipsContainer")
 					if ships_vbox:
 						var ship_container = ships_vbox.get_node_or_null(ship_instance_id)
 						if ship_container:
@@ -1224,6 +1452,9 @@ func enemy_turn():
 		else:
 			# No deployed ships - attack player
 			var damage = base_damage
+
+			# Play enemy attack animation targeting player
+			await play_enemy_attack_animation(enemy_index, "")
 
 			# Apply block if player has it
 			if player_block > 0:
@@ -1252,10 +1483,8 @@ func enemy_turn():
 				get_tree().reload_current_scene()
 				return
 
-		# Play attack animation for this enemy
-		# TODO: Implement per-enemy attack animations
-		# play_slime_attack_animation()
-		await get_tree().create_timer(0.5).timeout
+		# Small delay between enemy attacks for readability
+		await get_tree().create_timer(0.3).timeout
 		update_ui()
 
 	# After all enemies have attacked
@@ -1396,7 +1625,7 @@ func update_ui():
 
 func update_deployed_ships_ui():
 	# Update health bars for all deployed ships
-	var ships_vbox = $UI.get_node_or_null("ShipsContainer")
+	var ships_vbox = get_node_or_null("ShipsContainer")
 	if not ships_vbox:
 		return
 
