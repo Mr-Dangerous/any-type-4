@@ -20,25 +20,19 @@ const SIZE_MEDIUM = 36  # 48-64 range, using middle value
 const SIZE_LARGE = 48  # 64-128 range, using middle value
 const SIZE_EXTRA_LARGE = 80  # 128-192 range, using middle value
 
-# Ship type to size mapping
-const SHIP_SIZES = {
-	"interceptor": SIZE_TINY,
-	"fighter": SIZE_MEDIUM,
-	"frigate": SIZE_LARGE
-}
-
-# Ship deployment animation speeds (duration in seconds)
-const SHIP_DEPLOY_SPEED = {
-	"interceptor": 2.0,  # Fast
-	"fighter": 3.0,      # Medium
-	"frigate": 5.0       # Slow
-}
+# Ship data is now loaded from card_database/ship_database.csv via ShipDatabase singleton
+# SHIP_SIZES, SHIP_DEPLOY_SPEED, and SHIP_STATS have been removed
+# Use ShipDatabase.get_ship_data(ship_id) to access ship properties
 
 # Preload ship textures
 const MothershipTexture = preload("res://assets/Ships/illum_default/s_illum_default_24.png")
 const InterceptorTexture = preload("res://assets/Ships/illum_default/s_illum_default_23.png")
 const FighterTexture = preload("res://assets/Ships/illum_default/s_illum_default_19.png")
 const FrigateTexture = preload("res://assets/Ships/illum_default/s_illum_default_01.png")
+
+# Preload enemy textures
+const MookTexture = preload("res://assets/Ships/alien/s_alien_09.png")
+const EliteTexture = preload("res://assets/Ships/alien/s_alien_05.png")
 
 # Preload UI textures
 const CloseButtonTexture = preload("res://assets/UI/Close_BTN/Close_BTN.png")
@@ -47,16 +41,31 @@ const CloseButtonTexture = preload("res://assets/UI/Close_BTN/Close_BTN.png")
 const Space2Texture = preload("res://assets/Backgrounds/Space2/Bright/Space2.png")
 const Stones1Texture = preload("res://assets/Backgrounds/Space2/Bright/stones1.png")
 
+# Preload combat effects
+const LaserTexture = preload("res://assets/Effects/laser_light/s_laser_light_001.png")
+
 # Game state
 var lanes: Array[Dictionary] = []  # Each lane can contain units
 var selected_ship_type: String = ""  # Currently selected ship for deployment
 var ship_selection_panel: Panel = null
 var deploy_button: Button = null
+
+var selected_enemy_type: String = ""  # Currently selected enemy for deployment
+var enemy_selection_panel: Panel = null
+var deploy_enemy_button: Button = null
 var is_zoomed: bool = false
 var zoomed_lane_index: int = -1
 var camera: Camera2D = null
 var return_button: TextureButton = null
 var ui_layer: CanvasLayer = null
+
+# Combat state
+var selected_attacker: Dictionary = {}  # Ship that will attack
+var selected_target: Dictionary = {}  # Ship being targeted
+
+# Auto-combat state
+var auto_combat_active: bool = false
+var auto_combat_button: Button = null
 
 # Idle behavior constants
 const DRIFT_DISTANCE = 10.0  # How far ships drift backward
@@ -93,6 +102,9 @@ func _ready():
 	# Get the UI CanvasLayer from the scene
 	ui_layer = get_node("UI")
 
+	# Setup resource UI
+	setup_resource_ui()
+
 	# Initialize lanes
 	initialize_lanes()
 
@@ -105,8 +117,14 @@ func _ready():
 	# Setup deployment UI
 	setup_deployment_ui()
 
+	# Setup enemy deployment UI (for testing)
+	setup_enemy_deployment_ui()
+
 	# Setup return button (initially hidden)
 	setup_return_button()
+
+	# Setup auto-combat button
+	setup_auto_combat_button()
 
 	print("Combat_2 initialized with tactical view")
 
@@ -303,6 +321,116 @@ func setup_enemy_spawner():
 
 	print("Enemy spawner created at x=", ENEMY_SPAWN_X)
 
+func setup_resource_ui():
+	# Create resource UI display
+	var resource_ui = Control.new()
+	resource_ui.name = "ResourceUI"
+	var script = load("res://scripts/ResourceUI.gd")
+	resource_ui.set_script(script)
+	resource_ui.position = Vector2(20, 20)
+	ui_layer.add_child(resource_ui)
+	print("Resource UI created at top-left")
+
+func setup_enemy_deployment_ui():
+	# Create deploy enemy button (for testing)
+	deploy_enemy_button = Button.new()
+	deploy_enemy_button.name = "DeployEnemyButton"
+	deploy_enemy_button.text = "DEPLOY ENEMY"
+	deploy_enemy_button.position = Vector2(920, 80)  # Below player deploy button
+	deploy_enemy_button.size = Vector2(200, 50)
+	deploy_enemy_button.add_theme_font_size_override("font_size", 18)
+	deploy_enemy_button.pressed.connect(_on_deploy_enemy_button_pressed)
+	add_child(deploy_enemy_button)
+
+	# Get enemy ships from database
+	var enemy_ships = ShipDatabase.get_ships_by_faction("enemy")
+
+	# Calculate panel height based on number of enemies
+	var button_height = 50
+	var button_spacing = 10
+	var title_height = 60
+	var close_button_height = 40
+	var panel_height = title_height + (enemy_ships.size() * (button_height + button_spacing)) + close_button_height + 20
+
+	# Create enemy selection panel (initially hidden)
+	enemy_selection_panel = Panel.new()
+	enemy_selection_panel.name = "EnemySelectionPanel"
+	enemy_selection_panel.position = Vector2(350, 150)
+	enemy_selection_panel.size = Vector2(450, panel_height)
+	enemy_selection_panel.visible = false
+	add_child(enemy_selection_panel)
+
+	# Add panel background
+	var bg = ColorRect.new()
+	bg.color = Color(0.2, 0.15, 0.15, 0.95)
+	bg.size = enemy_selection_panel.size
+	enemy_selection_panel.add_child(bg)
+
+	# Add title
+	var title = Label.new()
+	title.text = "SELECT ENEMY TO DEPLOY"
+	title.position = Vector2(20, 20)
+	title.add_theme_font_size_override("font_size", 24)
+	title.add_theme_color_override("font_color", Color(1, 0.3, 0.3, 1))
+	enemy_selection_panel.add_child(title)
+
+	# Create enemy selection buttons dynamically from database
+	for i in range(enemy_ships.size()):
+		var enemy_data = enemy_ships[i]
+		var enemy_id = enemy_data["ship_id"]
+		var display_name = enemy_data["display_name"]
+		var sprite_path = enemy_data["sprite_path"]
+		var enemy_size = enemy_data["size"]
+
+		var button_y = title_height + (i * (button_height + button_spacing))
+
+		var enemy_button = Button.new()
+		enemy_button.name = enemy_id + "_button"
+		enemy_button.position = Vector2(20, button_y)
+		enemy_button.size = Vector2(410, button_height)
+		enemy_button.text = display_name
+		enemy_button.add_theme_font_size_override("font_size", 20)
+		enemy_button.pressed.connect(_on_enemy_selected.bind(enemy_id))
+		enemy_selection_panel.add_child(enemy_button)
+
+		# Add enemy icon to button
+		var icon = TextureRect.new()
+		icon.texture = load(sprite_path)
+		var icon_y = (button_height - enemy_size) / 2
+		icon.position = Vector2(10, icon_y)
+		icon.custom_minimum_size = Vector2(enemy_size, enemy_size)
+		icon.size = Vector2(enemy_size, enemy_size)
+		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		enemy_button.add_child(icon)
+
+	# Add close button at bottom
+	var close_button_y = panel_height - close_button_height - 10
+	var close_button = Button.new()
+	close_button.text = "CANCEL"
+	close_button.position = Vector2(150, close_button_y)
+	close_button.size = Vector2(150, 30)
+	close_button.pressed.connect(_on_close_enemy_panel)
+	enemy_selection_panel.add_child(close_button)
+
+func _on_deploy_enemy_button_pressed():
+	# Show enemy selection panel
+	enemy_selection_panel.visible = true
+	print("Deploy enemy button pressed - showing enemy selection")
+
+func _on_enemy_selected(enemy_type: String):
+	# Store selected enemy type
+	selected_enemy_type = enemy_type
+	enemy_selection_panel.visible = false
+	print("Selected enemy: ", enemy_type, " - Click a lane to deploy")
+
+func _on_close_enemy_panel():
+	# Hide panel and clear selection
+	enemy_selection_panel.visible = false
+	selected_enemy_type = ""
+	print("Enemy selection cancelled")
+
 func setup_deployment_ui():
 	# Create deploy ships button in top-right corner
 	deploy_button = Button.new()
@@ -314,11 +442,21 @@ func setup_deployment_ui():
 	deploy_button.pressed.connect(_on_deploy_button_pressed)
 	add_child(deploy_button)
 
+	# Get player ships from database
+	var player_ships = ShipDatabase.get_ships_by_faction("player")
+
+	# Calculate panel height based on number of ships
+	var button_height = 70
+	var button_spacing = 10
+	var title_height = 60
+	var close_button_height = 40
+	var panel_height = title_height + (player_ships.size() * (button_height + button_spacing)) + close_button_height + 20
+
 	# Create ship selection panel (initially hidden)
 	ship_selection_panel = Panel.new()
 	ship_selection_panel.name = "ShipSelectionPanel"
 	ship_selection_panel.position = Vector2(350, 150)
-	ship_selection_panel.size = Vector2(450, 350)
+	ship_selection_panel.size = Vector2(450, panel_height)
 	ship_selection_panel.visible = false
 	add_child(ship_selection_panel)
 
@@ -336,41 +474,43 @@ func setup_deployment_ui():
 	title.add_theme_color_override("font_color", Color(0.3, 0.8, 1, 1))
 	ship_selection_panel.add_child(title)
 
-	# Create ship selection buttons
-	var ship_types = [
-		{"name": "Basic Interceptor", "type": "interceptor", "texture": InterceptorTexture, "y": 80},
-		{"name": "Basic Fighter", "type": "fighter", "texture": FighterTexture, "y": 170},
-		{"name": "Basic Frigate", "type": "frigate", "texture": FrigateTexture, "y": 260}
-	]
+	# Create ship selection buttons dynamically from database
+	for i in range(player_ships.size()):
+		var ship_data = player_ships[i]
+		var ship_id = ship_data["ship_id"]
+		var display_name = ship_data["display_name"]
+		var sprite_path = ship_data["sprite_path"]
+		var ship_size = ship_data["size"]
 
-	for ship in ship_types:
+		var button_y = title_height + (i * (button_height + button_spacing))
+
 		var ship_button = Button.new()
-		ship_button.name = ship["type"] + "_button"
-		ship_button.position = Vector2(20, ship["y"])
-		ship_button.size = Vector2(410, 70)
-		ship_button.text = ship["name"]
+		ship_button.name = ship_id + "_button"
+		ship_button.position = Vector2(20, button_y)
+		ship_button.size = Vector2(410, button_height)
+		ship_button.text = display_name
 		ship_button.add_theme_font_size_override("font_size", 20)
-		ship_button.pressed.connect(_on_ship_selected.bind(ship["type"]))
+		ship_button.pressed.connect(_on_ship_selected.bind(ship_id))
 		ship_selection_panel.add_child(ship_button)
 
-		# Add ship icon to button (sized according to ship class)
+		# Add ship icon to button
 		var icon = TextureRect.new()
-		icon.texture = ship["texture"]
-		var icon_size = SHIP_SIZES[ship["type"]]
+		icon.texture = load(sprite_path)
 		# Center the icon vertically in the button
-		var icon_y = (70 - icon_size) / 2
+		var icon_y = (button_height - ship_size) / 2
 		icon.position = Vector2(10, icon_y)
-		icon.custom_minimum_size = Vector2(icon_size, icon_size)
-		icon.size = Vector2(icon_size, icon_size)
+		icon.custom_minimum_size = Vector2(ship_size, ship_size)
+		icon.size = Vector2(ship_size, ship_size)
 		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		ship_button.add_child(icon)
 
-	# Add close button
+	# Add close button at bottom
+	var close_button_y = panel_height - close_button_height - 10
 	var close_button = Button.new()
 	close_button.text = "CANCEL"
-	close_button.position = Vector2(150, 310)
+	close_button.position = Vector2(150, close_button_y)
 	close_button.size = Vector2(150, 30)
 	close_button.pressed.connect(_on_close_panel)
 	ship_selection_panel.add_child(close_button)
@@ -405,7 +545,7 @@ func _input(event):
 	# Handle lane click for ship deployment or zoom
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		# Don't process if clicking on UI elements
-		if ship_selection_panel.visible:
+		if ship_selection_panel.visible or enemy_selection_panel.visible:
 			return
 
 		var mouse_pos = get_global_mouse_position()
@@ -416,9 +556,19 @@ func _input(event):
 			if lane_index != -1:
 				deploy_ship_to_lane(selected_ship_type, lane_index)
 				selected_ship_type = ""  # Clear selection after deployment
-		elif not is_zoomed and lane_index != -1:
-			# No ship selected and not zoomed - zoom into lane
-			zoom_to_lane(lane_index)
+		elif selected_enemy_type != "":
+			# Enemy selected - deploy to lane
+			if lane_index != -1:
+				deploy_enemy_to_lane(selected_enemy_type, lane_index)
+				selected_enemy_type = ""  # Clear selection after deployment
+		else:
+			# Check if clicking on a ship for combat targeting
+			var clicked_unit = get_unit_at_position(mouse_pos)
+			if clicked_unit != null:
+				handle_unit_click(clicked_unit)
+			elif not is_zoomed and lane_index != -1:
+				# No ship selected and not zoomed - zoom into lane
+				zoom_to_lane(lane_index)
 
 func get_lane_at_position(pos: Vector2) -> int:
 	# Determine which lane a position is in
@@ -429,27 +579,122 @@ func get_lane_at_position(pos: Vector2) -> int:
 			return i
 	return -1
 
+func get_unit_at_position(pos: Vector2) -> Dictionary:
+	# Check if mouse position intersects with any unit (ship or enemy)
+	for lane in lanes:
+		for unit in lane["units"]:
+			if not unit.has("container") or not unit.has("size"):
+				print("Warning: Invalid unit data in lane")
+				continue
+
+			var container = unit["container"]
+			var unit_size = unit["size"]
+			var unit_pos = container.position
+
+			# Create bounding box for unit
+			var box_x1 = unit_pos.x
+			var box_y1 = unit_pos.y
+			var box_x2 = unit_pos.x + unit_size
+			var box_y2 = unit_pos.y + unit_size
+
+			# Check if mouse is inside bounding box
+			if pos.x >= box_x1 and pos.x <= box_x2 and pos.y >= box_y1 and pos.y <= box_y2:
+				print("Found unit at position - type: ", unit.get("type", "unknown"), ", is_enemy: ", unit.get("is_enemy", false))
+				return unit
+
+	return {}  # Return empty dictionary if no unit found
+
+func handle_unit_click(unit: Dictionary):
+	# Handle clicking on a unit for combat
+	# Now works for both player->enemy and enemy->player combat
+	if unit.is_empty():
+		print("Error: handle_unit_click called with empty unit")
+		return
+
+	var is_enemy = unit.get("is_enemy", false)
+	print("Handling unit click - is_enemy: ", is_enemy)
+
+	# First click: Select attacker (any unit)
+	if selected_attacker.is_empty():
+		select_attacker(unit)
+		return
+
+	# Clicking the same unit: Deselect
+	if selected_attacker == unit:
+		deselect_attacker()
+		return
+
+	# Check if this is a valid target
+	var attacker_is_enemy = selected_attacker.get("is_enemy", false)
+	var target_is_enemy = unit.get("is_enemy", false)
+
+	# Valid targeting: attacker and target must be on opposite sides
+	if attacker_is_enemy != target_is_enemy:
+		# Valid target - start attacking
+		select_target(unit)
+	else:
+		# Same side - switch to new attacker
+		deselect_attacker()
+		select_attacker(unit)
+
+func select_attacker(unit: Dictionary):
+	# Select any unit as the attacker (player ship or enemy)
+	if unit.is_empty():
+		print("Error: Attempted to select empty unit")
+		return
+
+	selected_attacker = unit
+	var unit_type = unit.get("type", "unknown")
+	var is_enemy = unit.get("is_enemy", false)
+	print("Selected attacker: ", unit_type, " (enemy: ", is_enemy, ")")
+
+	# Visual feedback - different colors for player vs enemy
+	if unit.has("sprite"):
+		var sprite = unit["sprite"]
+		if is_enemy:
+			sprite.modulate = Color(1.5, 0.5, 0.5)  # Red tint for enemy attackers
+		else:
+			sprite.modulate = Color(1.2, 1.2, 1.0)  # Yellow tint for player attackers
+	else:
+		print("Warning: Unit has no sprite")
+
+func deselect_attacker():
+	# Deselect the current attacker and stop attacking
+	if not selected_attacker.is_empty():
+		print("Deselected attacker")
+
+		# Remove visual feedback
+		var sprite = selected_attacker["sprite"]
+		sprite.modulate = Color(1, 1, 1)  # Reset to normal
+
+		# Stop attack timer if it exists
+		stop_continuous_attack()
+
+		selected_attacker = {}
+		selected_target = {}
+
+func select_target(unit: Dictionary):
+	# Select an enemy as the target
+	selected_target = unit
+	print("Selected target: ", unit["type"])
+
+	# Start attacking
+	start_attack_sequence()
+
 func deploy_ship_to_lane(ship_type: String, lane_index: int):
 	# Deploy a ship to the specified lane
 	print("Deploying ", ship_type, " to lane ", lane_index)
 
-	# Get ship texture and size
-	var ship_texture: Texture2D
-	var ship_size: int
-	var deploy_duration: float
-	match ship_type:
-		"interceptor":
-			ship_texture = InterceptorTexture
-			ship_size = SHIP_SIZES["interceptor"]
-			deploy_duration = SHIP_DEPLOY_SPEED["interceptor"]
-		"fighter":
-			ship_texture = FighterTexture
-			ship_size = SHIP_SIZES["fighter"]
-			deploy_duration = SHIP_DEPLOY_SPEED["fighter"]
-		"frigate":
-			ship_texture = FrigateTexture
-			ship_size = SHIP_SIZES["frigate"]
-			deploy_duration = SHIP_DEPLOY_SPEED["frigate"]
+	# Get ship data from database
+	var db_ship_data = ShipDatabase.get_ship_data(ship_type)
+	if db_ship_data.is_empty():
+		print("ERROR: Ship type '", ship_type, "' not found in database")
+		return
+
+	# Extract ship properties from database
+	var ship_texture: Texture2D = load(db_ship_data["sprite_path"])
+	var ship_size: int = db_ship_data["size"]
+	var deploy_duration: float = db_ship_data.get("deploy_speed", 3.0)  # Default 3.0s if not specified
 
 	# Calculate target position
 	var num_ships_in_lane = lanes[lane_index]["units"].size()
@@ -538,16 +783,102 @@ func deploy_ship_to_lane(ship_type: String, lane_index: int):
 		"size": ship_size,
 		"original_position": Vector2(target_x, target_y),
 		"idle_state": "waiting",  # States: waiting, drifting, returning
-		"idle_timer": 0.0
+		"idle_timer": 0.0,
+
+		# Combat stats
+		"stats": db_ship_data["stats"].duplicate(),
+		"current_armor": db_ship_data["stats"]["armor"],
+		"current_shield": db_ship_data["stats"]["shield"]
 	}
 
 	# Add to lane data
 	lanes[lane_index]["units"].append(ship_data)
 
+	# Create health bar
+	create_health_bar(ship_container, ship_size, ship_data["current_shield"], ship_data["current_armor"])
+
 	# Start idle behavior
 	start_ship_idle_behavior(ship_data)
 
-	print("Ship deployed successfully at x=", target_x, " y=", target_y, " with size=", ship_size)
+	print("Ship deployed successfully at x=", target_x, " y=", target_y, " with size=", ship_size, " | Stats: Armor=", ship_data["current_armor"], " Shield=", ship_data["current_shield"], " AttackSpeed=", ship_data["stats"]["attack_speed"])
+
+func deploy_enemy_to_lane(enemy_type: String, lane_index: int):
+	# Deploy an enemy to the specified lane
+	print("Deploying ", enemy_type, " to lane ", lane_index)
+
+	# Get enemy data from database
+	var db_enemy_data = ShipDatabase.get_ship_data(enemy_type)
+	if db_enemy_data.is_empty():
+		print("ERROR: Enemy type '", enemy_type, "' not found in database")
+		return
+
+	# Extract enemy properties from database
+	var enemy_texture: Texture2D = load(db_enemy_data["sprite_path"])
+	var enemy_size: int = db_enemy_data["size"]
+
+	# Count enemies in the same lane to calculate horizontal position
+	var enemies_in_lane = 0
+	for unit in lanes[lane_index]["units"]:
+		if unit.get("is_enemy", false):
+			enemies_in_lane += 1
+
+	var lane_y = lanes[lane_index]["y_position"]
+
+	# Position enemies on the right side (near enemy spawner)
+	# Start from enemy spawner and move left with spacing
+	var x_pos = ENEMY_SPAWN_X - 100 - (enemies_in_lane * 60)  # 60px spacing for enemies
+
+	# Calculate Y position with vertical stagger (same as player ships)
+	var vertical_positions = [
+		-30,  # Upper part of lane
+		0,    # Center of lane
+		30    # Lower part of lane
+	]
+	var y_offset = vertical_positions[enemies_in_lane % 3]
+	var random_offset = randf_range(-enemy_size * 0.3, enemy_size * 0.3)
+	var target_y = lane_y + y_offset + random_offset - (enemy_size / 2)
+
+	# Create enemy sprite container
+	var enemy_container = Control.new()
+	enemy_container.name = enemy_type + "_enemy_" + str(Time.get_ticks_msec())
+	enemy_container.position = Vector2(x_pos, target_y)
+	add_child(enemy_container)
+
+	var sprite = TextureRect.new()
+	sprite.name = "Sprite"
+	sprite.texture = enemy_texture
+	sprite.custom_minimum_size = Vector2(enemy_size, enemy_size)
+	sprite.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
+	sprite.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+
+	# Rotate enemy to face left (toward player)
+	sprite.pivot_offset = Vector2(enemy_size / 2, enemy_size / 2)
+	sprite.rotation = PI  # 180 degrees to face left
+
+	enemy_container.add_child(sprite)
+
+	# Create enemy data
+	var enemy_data = {
+		"type": enemy_type,
+		"container": enemy_container,
+		"sprite": sprite,
+		"size": enemy_size,
+		"is_enemy": true,
+		"position": Vector2(x_pos, target_y),
+
+		# Combat stats
+		"stats": db_enemy_data["stats"].duplicate(),
+		"current_armor": db_enemy_data["stats"]["armor"],
+		"current_shield": db_enemy_data["stats"]["shield"]
+	}
+
+	# Add to lane data
+	lanes[lane_index]["units"].append(enemy_data)
+
+	# Create health bar
+	create_health_bar(enemy_container, enemy_size, enemy_data["current_shield"], enemy_data["current_armor"])
+
+	print("Enemy deployed successfully at x=", x_pos, " y=", target_y, " with size=", enemy_size, " | Stats: Armor=", db_enemy_data["stats"]["armor"], " Shield=", db_enemy_data["stats"]["shield"], " AttackSpeed=", db_enemy_data["stats"]["attack_speed"])
 
 func start_ship_idle_behavior(ship_data: Dictionary):
 	# Initial rotation to face enemy
@@ -652,6 +983,17 @@ func setup_return_button():
 	# Add to UI layer so it's not affected by camera zoom
 	ui_layer.add_child(return_button)
 
+func setup_auto_combat_button():
+	# Create auto-combat button
+	auto_combat_button = Button.new()
+	auto_combat_button.name = "AutoCombatButton"
+	auto_combat_button.text = "START AUTO-COMBAT"
+	auto_combat_button.position = Vector2(450, 20)
+	auto_combat_button.size = Vector2(250, 50)
+	auto_combat_button.add_theme_font_size_override("font_size", 18)
+	auto_combat_button.pressed.connect(_on_auto_combat_toggled)
+	add_child(auto_combat_button)
+
 func zoom_to_lane(lane_index: int):
 	# Zoom camera to focus on specific lane
 	print("Zooming to lane ", lane_index)
@@ -696,6 +1038,677 @@ func _on_return_to_tactical():
 	# Show deploy button again
 	deploy_button.visible = true
 
-# Future functions to add:
-# - spawn_enemy(lane_index: int, enemy_type: String)
-# - update_lane(lane_index: int)
+# Combat system functions
+
+func start_attack_sequence():
+	# Begin the attack sequence: rotate ship, then fire
+	if selected_attacker.is_empty() or selected_target.is_empty():
+		return
+
+	print("Starting attack sequence")
+
+	# First, rotate to face target
+	rotate_ship_to_target()
+
+	# Fire immediately after rotation completes (0.3s delay)
+	await get_tree().create_timer(0.3).timeout
+
+	# Fire the first shot
+	fire_laser()
+
+	# Start continuous attack timer
+	start_continuous_attack()
+
+func rotate_ship_to_target():
+	# Rotate attacker to face the target
+	if selected_attacker.is_empty() or selected_target.is_empty():
+		return
+
+	var attacker_sprite = selected_attacker["sprite"]
+	var attacker_pos = selected_attacker["container"].position
+	var attacker_size = selected_attacker["size"]
+	var target_pos = selected_target["container"].position
+	var target_size = selected_target["size"]
+
+	# Calculate center positions
+	var attacker_center = attacker_pos + Vector2(attacker_size / 2, attacker_size / 2)
+	var target_center = target_pos + Vector2(target_size / 2, target_size / 2)
+
+	# Calculate angle to target
+	var direction = target_center - attacker_center
+	var target_rotation = direction.angle()
+
+	# Smoothly rotate to target
+	var tween = create_tween()
+	tween.tween_property(attacker_sprite, "rotation", target_rotation, 0.3)
+
+	print("Rotating attacker to face target")
+
+func fire_laser():
+	# Fire laser projectiles from attacker to target
+	# Number of projectiles based on ship's num_attacks stat
+	if selected_attacker.is_empty() or selected_target.is_empty():
+		return
+
+	var num_attacks = selected_attacker["stats"]["num_attacks"]
+	print("Firing ", num_attacks, " projectile(s)")
+
+	# Fire multiple projectiles with slight spacing
+	for i in range(num_attacks):
+		if i > 0:
+			# Add small delay between projectiles (0.05s)
+			await get_tree().create_timer(0.05).timeout
+		fire_single_laser()
+
+func fire_single_laser():
+	# Fire a single laser projectile from attacker to target
+	if selected_attacker.is_empty() or selected_target.is_empty():
+		return
+
+	var attacker_pos = selected_attacker["container"].position
+	var attacker_size = selected_attacker["size"]
+	var target_pos = selected_target["container"].position
+	var target_size = selected_target["size"]
+
+	# Calculate center positions
+	var start_pos = attacker_pos + Vector2(attacker_size / 2, attacker_size / 2)
+	var end_pos = target_pos + Vector2(target_size / 2, target_size / 2)
+
+	# Calculate direction and angle
+	var direction = end_pos - start_pos
+	var angle = direction.angle()
+
+	# Create laser sprite (small projectile)
+	var laser = Sprite2D.new()
+	laser.texture = LaserTexture
+	laser.position = start_pos
+	laser.rotation = angle
+	laser.z_index = 1  # Above ships
+	add_child(laser)
+
+	# Scale laser to be 6 pixels tall
+	var laser_height = LaserTexture.get_height()
+	var scale_y = 6.0 / laser_height
+	laser.scale = Vector2(scale_y, scale_y)  # Uniform scale to maintain aspect ratio
+
+	# Center the sprite
+	laser.offset = Vector2(-LaserTexture.get_width() / 2, -LaserTexture.get_height() / 2)
+
+	# Animate laser: fly quickly to target (0.2 seconds)
+	var flight_duration = 0.2
+	var tween = create_tween()
+	tween.tween_property(laser, "position", end_pos, flight_duration)
+	tween.tween_callback(func():
+		# Hit the target
+		on_laser_hit(laser)
+	)
+
+func on_laser_hit(laser: Sprite2D):
+	# Handle laser hitting the target
+	# Remove the laser projectile
+	laser.queue_free()
+
+	# Calculate and apply damage
+	if not selected_attacker.is_empty() and not selected_target.is_empty():
+		var damage_dealt = calculate_damage(selected_attacker, selected_target)
+		if damage_dealt > 0:
+			apply_damage(selected_target, damage_dealt)
+
+	# Flash the target
+	if not selected_target.is_empty() and selected_target.has("sprite"):
+		var target_sprite = selected_target["sprite"]
+
+		# Create flash animation - white flash then back to normal
+		var flash_tween = create_tween()
+		flash_tween.tween_property(target_sprite, "modulate", Color(2.0, 2.0, 2.0, 1.0), 0.05)  # Flash white
+		flash_tween.tween_property(target_sprite, "modulate", Color(1.0, 1.0, 1.0, 1.0), 0.1)   # Return to normal
+
+func calculate_damage(attacker: Dictionary, target: Dictionary) -> int:
+	# Calculate damage from attacker to target
+	# Returns 0 if attack misses, otherwise returns damage amount
+
+	if attacker.is_empty() or target.is_empty():
+		return 0
+
+	# Get stats
+	var attacker_accuracy = attacker["stats"].get("accuracy", 0)
+	var attacker_damage = attacker["stats"].get("damage", 0)
+	var target_evasion = target["stats"].get("evasion", 0)
+	var target_reinforced = target["stats"].get("reinforced_armor", 0)
+
+	# Hit chance calculation: accuracy / (accuracy + evasion)
+
+	var hit_chance = 1.0
+	hit_chance -= (target_evasion*.01)
+	if hit_chance < 0:
+		hit_chance = 0
+	
+	var crit_chance = 1.0-((attacker_accuracy)*.01)
+	var crit_roll = randf()
+	var critical_hit = false
+	if crit_roll > crit_chance:
+		critical_hit = true
+	if (critical_hit):
+		#it has a chance to negate a crit via a critical hit of its own.  so if a ship has 15 reinforced, then it has a 15% chance to negate any critical hit against it and reduce it to a normal hit
+		print("crit!")
+	# Roll for hit/miss
+	var roll = randf()  # Random float between 0.0 and 1.0
+	if roll > hit_chance:
+		print("MISS! (rolled ", roll, " vs hit chance ", hit_chance, ")")
+		return 0  # Attack missed
+
+	# Hit! Calculate damage
+	var base_damage = attacker_damage
+
+	# Apply reinforced armor reduction (reduces damage by %)
+	# reinforced_armor of 10 = 10% damage reduction
+	# reinforced_armor of 50 = 50% damage reduction
+	var damage_multiplier = 1.0 - (float(target_reinforced) / 100.0)
+	damage_multiplier = max(0.0, damage_multiplier)  # Can't go below 0
+
+	var final_damage = int(base_damage * damage_multiplier)
+	if (critical_hit):
+		final_damage*=2
+	final_damage = max(1, final_damage)  # Always do at least 1 damage on hit
+
+	print("HIT! Damage: ", final_damage, " (base: ", base_damage, ", armor reduction: ", target_reinforced, "%)")
+	return final_damage
+
+func apply_damage(target: Dictionary, damage: int):
+	# Apply damage to target's shields first, then armor
+	if target.is_empty():
+		return
+
+	var remaining_damage = damage
+
+	# Damage shields first
+	if target.has("current_shield") and target["current_shield"] > 0:
+		var shield_damage = min(target["current_shield"], remaining_damage)
+		target["current_shield"] -= shield_damage
+		remaining_damage -= shield_damage
+		print("  Shield damaged: -", shield_damage, " (", target["current_shield"], " remaining)")
+
+	# Overflow damage goes to armor
+	if remaining_damage > 0 and target.has("current_armor"):
+		var armor_damage = min(target["current_armor"], remaining_damage)
+		target["current_armor"] -= armor_damage
+		print("  Armor damaged: -", armor_damage, " (", target["current_armor"], " remaining)")
+
+	# Update health bar
+	update_health_bar(target)
+
+	# Check if ship is destroyed
+	var total_health = target.get("current_armor", 0) + target.get("current_shield", 0)
+	if total_health <= 0:
+		print("  SHIP DESTROYED!")
+		destroy_ship(target)
+
+func start_continuous_attack():
+	# Start attack cycle - attacks happen at attack_speed per second
+	if selected_attacker.is_empty() or selected_target.is_empty():
+		return
+
+	# Calculate attack interval: 1 / attack_speed = seconds per attack
+	# attack_speed of 1.5 = 1.5 attacks/second = 0.667s per attack
+	# attack_speed of 0.3 = 0.3 attacks/second = 3.333s per attack
+	# attack_speed of 10 = 10 attacks/second = 0.1s per attack
+	var attack_speed = selected_attacker["stats"]["attack_speed"]
+	var attack_interval = 1.0 / attack_speed
+
+	# Start attack cycle
+	attack_cycle(selected_attacker, selected_target, attack_interval)
+
+	print("Started continuous attack - attack speed: ", attack_speed, " attacks/sec (", attack_interval, "s per attack)")
+
+func attack_cycle(attacker: Dictionary, target: Dictionary, attack_interval: float):
+	# Continuous attack cycle
+	while not attacker.is_empty() and not target.is_empty():
+		# Check if still attacking same target
+		if selected_attacker != attacker or selected_target != target:
+			break
+
+		# Fire all projectiles in this attack
+		await fire_laser()
+
+		# Wait for cooldown (timer resets AFTER last projectile fires)
+		await get_tree().create_timer(attack_interval).timeout
+
+		# Check if units still exist
+		if not is_instance_valid(attacker.get("container")) or not is_instance_valid(target.get("container")):
+			break
+
+func _on_attack_timer_timeout():
+	# Legacy callback - no longer used
+	pass
+
+func stop_continuous_attack():
+	# Stop the continuous attack timer
+	if selected_attacker.is_empty():
+		return
+
+	var container = selected_attacker["container"]
+	var timer = container.get_node_or_null("AttackTimer")
+
+	if timer:
+		timer.stop()
+		timer.queue_free()
+		print("Stopped continuous attack")
+
+func destroy_ship(ship: Dictionary):
+	# Destroy a ship when its health reaches 0
+	if ship.is_empty():
+		return
+
+	var ship_type = ship.get("type", "unknown")
+	var is_enemy = ship.get("is_enemy", false)
+	print("Destroying ship: ", ship_type, " (enemy: ", is_enemy, ")")
+
+	# Clear selections if this ship was selected
+	if selected_attacker == ship:
+		deselect_attacker()
+	if selected_target == ship:
+		selected_target = {}
+
+	# Stop any attack timer on this ship
+	if ship.has("container"):
+		var container = ship["container"]
+		var timer = container.get_node_or_null("AttackTimer")
+		if timer:
+			timer.stop()
+			timer.queue_free()
+
+		# TODO: Play destruction animation/effect here
+		# For now, just remove immediately
+		container.queue_free()
+
+	# Remove ship from its lane
+	for lane in lanes:
+		var index = lane["units"].find(ship)
+		if index != -1:
+			lane["units"].remove_at(index)
+			print("Ship removed from lane ", lane["index"])
+			break
+
+	# In auto-combat, reassign targets for any ships that were targeting this destroyed ship
+	if auto_combat_active:
+		for lane in lanes:
+			for unit in lane["units"]:
+				if unit.get("auto_target") == ship:
+					assign_random_target(unit)
+
+# Auto-combat functions
+
+func _on_auto_combat_toggled():
+	# Toggle auto-combat mode
+	auto_combat_active = !auto_combat_active
+
+	if auto_combat_active:
+		auto_combat_button.text = "STOP AUTO-COMBAT"
+		start_auto_combat()
+		print("Auto-combat STARTED")
+	else:
+		auto_combat_button.text = "START AUTO-COMBAT"
+		stop_auto_combat()
+		print("Auto-combat STOPPED")
+
+func start_auto_combat():
+	# Start auto-combat: all ships attack random enemies
+	# Assign random targets to all units
+	for lane in lanes:
+		for unit in lane["units"]:
+			# Assign random target
+			assign_random_target(unit)
+			# Start target switching timer (switches every 3 seconds)
+			start_target_switch_timer(unit)
+
+func stop_auto_combat():
+	# Stop all auto-combat attacks
+	for lane in lanes:
+		for unit in lane["units"]:
+			# Stop attack timers
+			if unit.has("container"):
+				var container = unit["container"]
+				var attack_timer = container.get_node_or_null("AttackTimer")
+				if attack_timer:
+					attack_timer.stop()
+					attack_timer.queue_free()
+				var switch_timer = container.get_node_or_null("TargetSwitchTimer")
+				if switch_timer:
+					switch_timer.stop()
+					switch_timer.queue_free()
+			# Clear auto-combat data
+			unit.erase("auto_target")
+			# Reset sprite modulation
+			if unit.has("sprite"):
+				unit["sprite"].modulate = Color(1, 1, 1)
+
+func assign_random_target(unit: Dictionary):
+	# Assign a random enemy target to a unit
+	if unit.is_empty():
+		return
+
+	var is_enemy = unit.get("is_enemy", false)
+	var potential_targets: Array[Dictionary] = []
+
+	# Find all valid targets (opposite faction)
+	for lane in lanes:
+		for other_unit in lane["units"]:
+			var other_is_enemy = other_unit.get("is_enemy", false)
+			if is_enemy != other_is_enemy:  # Opposite factions
+				potential_targets.append(other_unit)
+
+	# If no targets, clear auto_target
+	if potential_targets.is_empty():
+		unit["auto_target"] = null
+		print("No targets available for ", unit.get("type", "unknown"))
+		return
+
+	# Pick random target
+	var random_index = randi() % potential_targets.size()
+	var target = potential_targets[random_index]
+	unit["auto_target"] = target
+
+	# Start attacking
+	start_auto_attack(unit, target)
+
+	print("Assigned target: ", unit.get("type", "unknown"), " -> ", target.get("type", "unknown"))
+
+func start_target_switch_timer(unit: Dictionary):
+	# Start a timer that switches targets every 3 seconds
+	if unit.is_empty() or not unit.has("container"):
+		return
+
+	var container = unit["container"]
+
+	# Clear existing timer
+	var existing_timer = container.get_node_or_null("TargetSwitchTimer")
+	if existing_timer:
+		existing_timer.queue_free()
+
+	# Create timer that fires every 3 seconds
+	var timer = Timer.new()
+	timer.name = "TargetSwitchTimer"
+	timer.wait_time = 3.0
+	timer.autostart = true
+	timer.timeout.connect(func(): _on_target_switch_timeout(unit))
+	container.add_child(timer)
+
+func _on_target_switch_timeout(unit: Dictionary):
+	# Switch to a new random target
+	if not auto_combat_active:
+		return
+
+	if unit.is_empty() or not is_instance_valid(unit.get("container")):
+		return
+
+	print("Target switch timer - reassigning for ", unit.get("type", "unknown"))
+	assign_random_target(unit)
+
+func start_auto_attack(attacker: Dictionary, target: Dictionary):
+	# Start an auto-attack sequence
+	if attacker.is_empty() or target.is_empty():
+		return
+
+	# Rotate to face target
+	auto_rotate_to_target(attacker, target)
+
+	# Calculate attack interval: 1 / attack_speed = seconds per attack
+	var attack_speed = attacker["stats"]["attack_speed"]
+	var attack_interval = 1.0 / attack_speed
+
+	# Fire first shot after rotation
+	await get_tree().create_timer(0.3).timeout
+	if not is_instance_valid(attacker.get("container")):
+		return
+
+	# Fire first volley immediately
+	await auto_fire_laser(attacker, target)
+
+	# Start continuous attack cycle
+	auto_attack_cycle(attacker, target, attack_interval)
+
+func auto_rotate_to_target(attacker: Dictionary, target: Dictionary):
+	# Rotate attacker to face target (for auto-combat)
+	if attacker.is_empty() or target.is_empty():
+		return
+
+	if not attacker.has("sprite") or not attacker.has("container"):
+		return
+
+	var attacker_sprite = attacker["sprite"]
+	var attacker_pos = attacker["container"].position
+	var attacker_size = attacker["size"]
+	var target_pos = target["container"].position
+	var target_size = target["size"]
+
+	# Calculate center positions
+	var attacker_center = attacker_pos + Vector2(attacker_size / 2, attacker_size / 2)
+	var target_center = target_pos + Vector2(target_size / 2, target_size / 2)
+
+	# Calculate angle to target
+	var direction = target_center - attacker_center
+	var target_rotation = direction.angle()
+
+	# Smoothly rotate to target
+	var tween = create_tween()
+	tween.tween_property(attacker_sprite, "rotation", target_rotation, 0.3)
+
+func auto_attack_cycle(attacker: Dictionary, target: Dictionary, attack_interval: float):
+	# Continuous auto-attack cycle
+	while auto_combat_active and not attacker.is_empty() and not target.is_empty():
+		# Check if target is still assigned and valid
+		var current_target = attacker.get("auto_target")
+		if current_target != target or not is_instance_valid(target.get("container")):
+			# Target changed or destroyed, stop this cycle
+			break
+
+		# Check if attacker still exists
+		if not is_instance_valid(attacker.get("container")):
+			break
+
+		# Fire all projectiles in this attack
+		await auto_fire_laser(attacker, target)
+
+		# Wait for cooldown (timer resets AFTER all projectiles fire)
+		await get_tree().create_timer(attack_interval).timeout
+
+func auto_fire_laser(attacker: Dictionary, target: Dictionary):
+	# Fire laser projectiles in auto-combat (all projectiles in one attack)
+	if attacker.is_empty() or target.is_empty():
+		return
+
+	if not is_instance_valid(attacker.get("container")) or not is_instance_valid(target.get("container")):
+		return
+
+	var num_attacks = attacker["stats"]["num_attacks"]
+
+	# Fire multiple projectiles with small delay between them
+	for i in range(num_attacks):
+		if i > 0:
+			await get_tree().create_timer(0.05).timeout
+		auto_fire_single_laser(attacker, target)
+
+func auto_fire_single_laser(attacker: Dictionary, target: Dictionary):
+	# Fire a single laser in auto-combat
+	if attacker.is_empty() or target.is_empty():
+		return
+
+	if not is_instance_valid(attacker.get("container")) or not is_instance_valid(target.get("container")):
+		return
+
+	var attacker_pos = attacker["container"].position
+	var attacker_size = attacker["size"]
+	var target_pos = target["container"].position
+	var target_size = target["size"]
+
+	# Calculate center positions
+	var start_pos = attacker_pos + Vector2(attacker_size / 2, attacker_size / 2)
+	var end_pos = target_pos + Vector2(target_size / 2, target_size / 2)
+
+	# Calculate direction and angle
+	var direction = end_pos - start_pos
+	var angle = direction.angle()
+
+	# Create laser sprite
+	var laser = Sprite2D.new()
+	laser.texture = LaserTexture
+	laser.position = start_pos
+	laser.rotation = angle
+	laser.z_index = 1
+	add_child(laser)
+
+	# Scale laser
+	var laser_height = LaserTexture.get_height()
+	var scale_y = 6.0 / laser_height
+	laser.scale = Vector2(scale_y, scale_y)
+	laser.offset = Vector2(-LaserTexture.get_width() / 2, -LaserTexture.get_height() / 2)
+
+	# Animate laser
+	var flight_duration = 0.2
+	var tween = create_tween()
+	tween.tween_property(laser, "position", end_pos, flight_duration)
+	tween.tween_callback(func():
+		auto_on_laser_hit(laser, attacker, target)
+	)
+
+func auto_on_laser_hit(laser: Sprite2D, attacker: Dictionary, target: Dictionary):
+	# Handle laser hit in auto-combat
+	laser.queue_free()
+
+	# Check if units still exist
+	if attacker.is_empty() or target.is_empty():
+		return
+	if not is_instance_valid(target.get("container")):
+		return
+
+	# Calculate and apply damage
+	var damage_dealt = calculate_damage(attacker, target)
+	if damage_dealt > 0:
+		apply_damage(target, damage_dealt)
+
+	# Flash target
+	if target.has("sprite"):
+		var target_sprite = target["sprite"]
+		var flash_tween = create_tween()
+		flash_tween.tween_property(target_sprite, "modulate", Color(2.0, 2.0, 2.0, 1.0), 0.05)
+		flash_tween.tween_property(target_sprite, "modulate", Color(1.0, 1.0, 1.0, 1.0), 0.1)
+
+
+# Health bar functions
+
+func create_health_bar(ship_container: Control, ship_size: int, max_shield: int, max_armor: int):
+	# Create health bar UI above ship (max 32px wide)
+	var bar_width = min(32, ship_size)  # Cap at 32 pixels
+	var health_bar_container = Control.new()
+	health_bar_container.name = "HealthBar"
+	health_bar_container.position = Vector2((ship_size - bar_width) / 2, -15)  # Center above ship
+	health_bar_container.size = Vector2(bar_width, 8)
+	ship_container.add_child(health_bar_container)
+
+	# Background (dark gray)
+	var bg = ColorRect.new()
+	bg.name = "Background"
+	bg.color = Color(0.2, 0.2, 0.2, 0.8)
+	bg.size = Vector2(bar_width, 8)
+	health_bar_container.add_child(bg)
+
+	# Armor bar (red/orange)
+	var armor_bar = ColorRect.new()
+	armor_bar.name = "ArmorBar"
+	armor_bar.color = Color(0.8, 0.3, 0.2, 1.0)
+	armor_bar.size = Vector2(bar_width, 4)
+	armor_bar.position = Vector2(0, 4)
+	health_bar_container.add_child(armor_bar)
+
+	# Shield bar (cyan/blue)
+	var shield_bar = ColorRect.new()
+	shield_bar.name = "ShieldBar"
+	shield_bar.color = Color(0.2, 0.7, 1.0, 1.0)
+	shield_bar.size = Vector2(bar_width, 4)
+	shield_bar.position = Vector2(0, 0)
+	health_bar_container.add_child(shield_bar)
+
+func update_health_bar(ship: Dictionary):
+	# Update health bar to reflect current health
+	if not ship.has("container"):
+		return
+
+	var container = ship["container"]
+	var health_bar_container = container.get_node_or_null("HealthBar")
+	if not health_bar_container:
+		return
+
+	var ship_size = ship["size"]
+	var bar_width = min(32, ship_size)  # Cap at 32 pixels
+	var max_armor = ship["stats"]["armor"]
+	var max_shield = ship["stats"]["shield"]
+	var current_armor = ship.get("current_armor", max_armor)
+	var current_shield = ship.get("current_shield", max_shield)
+
+	# Update armor bar width
+	var armor_bar = health_bar_container.get_node_or_null("ArmorBar")
+	if armor_bar and max_armor > 0:
+		var armor_percent = float(current_armor) / float(max_armor)
+		armor_bar.size.x = bar_width * armor_percent
+
+	# Update shield bar width
+	var shield_bar = health_bar_container.get_node_or_null("ShieldBar")
+	if shield_bar and max_shield > 0:
+		var shield_percent = float(current_shield) / float(max_shield)
+		shield_bar.size.x = bar_width * shield_percent
+
+# Stat helper functions
+
+func get_unit_stat(unit: Dictionary, stat_name: String):
+	# Get a stat value from a unit's stats dictionary
+	if unit.has("stats") and unit["stats"].has(stat_name):
+		return unit["stats"][stat_name]
+	print("Warning: Unit missing stat '", stat_name, "'")
+	return 0
+
+func modify_unit_stat(unit: Dictionary, stat_name: String, amount: float):
+	# Modify a stat value (for upgrades/debuffs)
+	if unit.has("stats") and unit["stats"].has(stat_name):
+		unit["stats"][stat_name] += amount
+		print("Modified ", stat_name, " by ", amount, ". New value: ", unit["stats"][stat_name])
+		return true
+	print("Warning: Cannot modify stat '", stat_name, "' - unit missing stat")
+	return false
+
+func get_unit_health_percent(unit: Dictionary) -> float:
+	# Calculate total health percentage (armor + shield)
+	if not unit.has("stats"):
+		return 0.0
+
+	var max_armor = unit["stats"]["armor"]
+	var max_shield = unit["stats"]["shield"]
+	var current_armor = unit.get("current_armor", max_armor)
+	var current_shield = unit.get("current_shield", max_shield)
+
+	var max_health = max_armor + max_shield
+	var current_health = current_armor + current_shield
+
+	if max_health <= 0:
+		return 0.0
+
+	return (current_health / max_health) * 100.0
+
+func display_unit_stats(unit: Dictionary):
+	# Debug function to print all unit stats
+	if not unit.has("stats"):
+		print("Unit has no stats")
+		return
+
+	print("=== Unit Stats ===")
+	print("Type: ", unit.get("type", "unknown"))
+	print("Armor: ", unit.get("current_armor", 0), " / ", unit["stats"]["armor"])
+	print("Shield: ", unit.get("current_shield", 0), " / ", unit["stats"]["shield"])
+	print("Reinforced Armor: ", unit["stats"]["reinforced_armor"], "%")
+	print("Evasion: ", unit["stats"]["evasion"], "%")
+	print("Accuracy: ", unit["stats"]["accuracy"])
+	print("Attack Speed: ", unit["stats"]["attack_speed"], "x")
+	print("Num Attacks: ", unit["stats"]["num_attacks"])
+	print("Amplitude: ", unit["stats"]["amplitude"])
+	print("Frequency: ", unit["stats"]["frequency"])
+	print("Health: ", get_unit_health_percent(unit), "%")
+	print("==================")

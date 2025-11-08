@@ -12,6 +12,14 @@ var has_combat_state: bool = false
 var player_deck: Array[Dictionary] = []
 var has_deck_data: bool = false
 
+# Player resources
+var metal: int = 50
+var crystals: int = 30
+var fuel: int = 3
+var pilots: int = 3
+var metal_large: int = 3  # Placeholder
+var crystal_large: int = 3  # Placeholder
+
 func save_starmap(stars: Array[Dictionary]):
 	star_data = stars.duplicate(true)
 	has_starmap_data = true
@@ -49,3 +57,58 @@ func get_deck() -> Array[Dictionary]:
 func clear_deck():
 	player_deck.clear()
 	has_deck_data = false
+
+# Resource management
+func add_resource(type: String, amount: int):
+	match type:
+		"metal":
+			metal += amount
+		"crystals":
+			crystals += amount
+		"fuel":
+			fuel += amount
+		"pilots":
+			pilots += amount
+		"metal_large":
+			metal_large += amount
+		"crystal_large":
+			crystal_large += amount
+	print("Added ", amount, " ", type, ". New total: ", get_resource(type))
+
+func spend_resource(type: String, amount: int) -> bool:
+	var current = get_resource(type)
+	if current >= amount:
+		match type:
+			"metal":
+				metal -= amount
+			"crystals":
+				crystals -= amount
+			"fuel":
+				fuel -= amount
+			"pilots":
+				pilots -= amount
+			"metal_large":
+				metal_large -= amount
+			"crystal_large":
+				crystal_large -= amount
+		print("Spent ", amount, " ", type, ". Remaining: ", get_resource(type))
+		return true
+	else:
+		print("Insufficient ", type, ". Have: ", current, ", Need: ", amount)
+		return false
+
+func get_resource(type: String) -> int:
+	match type:
+		"metal":
+			return metal
+		"crystals":
+			return crystals
+		"fuel":
+			return fuel
+		"pilots":
+			return pilots
+		"metal_large":
+			return metal_large
+		"crystal_large":
+			return crystal_large
+	return 0
