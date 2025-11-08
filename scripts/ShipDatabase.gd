@@ -85,10 +85,10 @@ func parse_ship_line(header: PackedStringArray, line: PackedStringArray) -> Dict
 
 		# Parse value based on column type
 		match column_name:
-			"ship_id", "display_name", "faction", "sprite_path", "projectile_sprite", "size_class", "description":
+			"ship_id", "display_name", "faction", "sprite_path", "projectile_sprite", "size_class", "description", "ability_function", "abilty", "ability_description":
 				ship_data[column_name] = value
 
-			"size", "armor", "shield", "reinforced_armor", "evasion", "damage", "accuracy", "num_attacks", "amplitude", "frequency":
+			"size", "armor", "shield", "reinforced_armor", "evasion", "damage", "accuracy", "num_attacks", "amplitude", "frequency", "energy", "starting_energy", "upgrade_slots":
 				ship_data[column_name] = int(value) if value != "" else 0
 
 			"deploy_speed", "attack_speed":
@@ -109,7 +109,9 @@ func parse_ship_line(header: PackedStringArray, line: PackedStringArray) -> Dict
 			"attack_speed": ship_data.get("attack_speed", 1.0),
 			"num_attacks": ship_data.get("num_attacks", 1),
 			"amplitude": ship_data.get("amplitude", 0),
-			"frequency": ship_data.get("frequency", 0)
+			"frequency": ship_data.get("frequency", 0),
+			"energy": ship_data.get("energy", 0),
+			"starting_energy": ship_data.get("starting_energy", 0)
 		}
 
 	return ship_data

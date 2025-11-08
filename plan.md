@@ -305,13 +305,88 @@ TODO: The  UI has two additionlal resources, needs a proper window, and also nee
   - Enemy combat stats tracked in lane units
   - Enemies can be targeted by player ships
 
-### 2.11 NOT YET IMPLEMENTED
+### 2.11 Damage & Health System ✓ COMPLETED
+- [x] Damage calculation system
+  - Hit chance: 1.0 - (target_evasion * 0.01)
+  - Critical hit chance: 1.0 - (attacker_accuracy * 0.01)
+  - Reinforced armor damage reduction
+  - Critical hits deal 2x damage
+  - Minimum 1 damage on hit
+- [x] Health bar display
+  - 3-tier health bars above ships
+  - Shield bar (cyan, top row)
+  - Armor bar (red, middle row)
+  - Energy bar (purple, bottom row)
+  - Max 32px width, scales with ship health
+- [x] Damage application
+  - Damage shields first, overflow to armor
+  - Ships destroyed when total health reaches 0
+  - Hit flash visual feedback (white flash)
+  - Health bars update in real-time
+- [x] Ship destruction system
+  - Ships removed from lane when destroyed
+  - Container freed from scene tree
+  - Attack timers cleaned up
+  - Auto-targets reassigned if needed
+
+### 2.12 Auto-Combat System ✓ COMPLETED
+- [x] Auto-targeting system
+  - Assign random targets to all ships
+  - Target switching every 3 seconds
+  - Targets restricted to opposite faction
+  - Lane-restricted targeting when zoomed
+- [x] Auto-attack cycle
+  - Continuous attacks based on attack_speed
+  - Auto-rotation to face current target
+  - Energy generation after each attack (2-4 random)
+  - Ability auto-cast when energy full
+- [x] Combat state management
+  - combat_paused flag controls all combat
+  - Start/stop auto-combat via button
+  - All ships attack simultaneously
+  - Clean timer management on stop
+
+### 2.13 Turn-Based Combat Structure ✓ COMPLETED
+- [x] Turn mode system
+  - "START AUTO-COMBAT" button initiates turn mode
+  - Turn progression button (bottom-right, UI layer)
+  - Four phases: tactical, lane_0, lane_1, lane_2
+  - Sequential lane combat with player control
+- [x] Turn progression flow
+  - Tactical phase: "Proceed to Lane 1" button
+  - Zoom to lane when proceeding
+  - "Start Combat" button appears when ready
+  - 5-second combat timer per lane
+  - Auto-transition to next lane after timer
+  - Return to tactical after all lanes complete
+- [x] Turn mode restrictions
+  - Manual lane zoom disabled in turn mode
+  - Return button hidden in turn mode
+  - Lane-restricted targeting enforced
+  - Combat only active during lane phase
+- [x] UI integration
+  - Turn progression button on UI layer (zoom-safe)
+  - Zoom timer label on UI layer
+  - Button text updates based on phase
+  - Button hides during active combat
+
+### 2.14 Energy & Ability System ✓ COMPLETED
+- [x] Energy generation
+  - Ships gain 2-4 energy per attack
+  - Energy tracked per ship (current_energy)
+  - Max energy defined in ship stats
+  - Energy bar displays current/max
+- [x] Ability casting
+  - Auto-cast when energy reaches max
+  - Energy resets to 0 after cast
+  - Ability name and description from database
+  - Console logging for ability casts
+- [ ] Ability effects (not yet implemented - functions are placeholders)
+
+### 2.15 NOT YET IMPLEMENTED
 The following systems from the original plan are not yet implemented:
 
-- [ ] Damage calculation and health reduction
-- [ ] Health bar display for ships
-- [ ] Ship destruction when health reaches 0
-- [ ] Card system (hand, draw, discard)
+- [ ] Card system (hand, draw, discard, card play mechanics)
 - [ ] Enemy wave system and AI movement
 - [ ] Pilot system
 - [ ] Turret system
@@ -321,6 +396,7 @@ The following systems from the original plan are not yet implemented:
 - [ ] Rewards system
 - [ ] VFX and particle effects beyond basic hit flash
 - [ ] Combo system
+- [ ] Actual ability effect implementations
 
 ---
 
@@ -475,36 +551,44 @@ StarMap → ...
 12. Resource UI display (6 resource types)
 13. Enemy deployment system (for testing)
 14. Bidirectional combat (player↔enemy)
+15. **Damage & Health System** - Damage calculation, health bars, ship destruction
+16. **Auto-Combat System** - Auto-targeting, target switching, continuous attacks
+17. **Turn-Based Combat Structure** - Sequential lane combat, turn progression button
+18. **Energy & Ability System** - Energy generation, ability auto-cast (effects not yet implemented)
 
-### Immediate Next Steps
-1. **Damage & Health System**
-   - Implement damage calculation when lasers hit
-   - Apply accuracy vs evasion mechanics
-   - Reduce shield first, then armor
-   - Account for reinforced_armor stat
-   - Display health bars above ships
-   - Ship destruction when health reaches 0
+### Immediate Next Steps - CARD MECHANICS
+The combat sandbox is now nearly complete. Next focus is implementing the card system:
 
-2. **Enemy AI & Wave System**
-   - Enemy auto-targeting (select nearest player ship)
-   - Enemy wave spawning from right side
-   - Enemy movement toward player ships
-   - Wave preview and timing
-   - Multiple enemy types per wave
+1. **Card Hand UI**
+   - Display player hand at bottom of screen (UI layer)
+   - 5-card hand with card preview on hover
+   - Card art, name, cost, description display
+   - Draw pile and discard pile counters
 
-3. **Card System Integration**
-   - Implement card hand UI
-   - Draw 3 cards per turn
-   - Card play mechanics
-   - Connect cards to ship deployment
-   - Card effects and abilities
+2. **Card Play Mechanics**
+   - Drag cards to lanes or click to select
+   - Resource cost validation before play
+   - Card effects trigger on play
+   - Discard card after use
+   - End turn button to advance
 
-4. **Basic Game Loop**
-   - Turn-based structure
-   - Victory conditions (defeat all enemies)
-   - Defeat conditions (mothership destroyed)
-   - Combat rewards (resources)
-   - Resource spending for ship deployment
+3. **Card Effects System**
+   - Deploy ship cards (spawn ships in lanes)
+   - Instant effect cards (damage, healing, buffs)
+   - Persistent effect cards (upgrades, abilities)
+   - Target selection for targeted cards
+
+4. **Card Draw & Turn System**
+   - Draw 5 cards at start of turn
+   - Shuffle discard into draw when empty
+   - Starting deck loaded from CSV
+   - Turn counter and phase tracking
+
+5. **Integration with Combat**
+   - Cards deploy ships instead of direct deployment buttons
+   - Resource costs deducted from GameData
+   - Card effects interact with ships in lanes
+   - Combat rewards give new cards
 
 ### Medium-Term Goals
 1. Pilot system (assignment, traits, injury)
@@ -541,28 +625,39 @@ StarMap → ...
 ✓ **Projectiles**: Laser sprites, attack speed-based firing, multi-shot support
 ✓ **Resources**: 6 types tracked (metal, crystals, fuel, pilots, metal_large, crystal_large)
 ✓ **Enemy Data**: Enemies stored in same ship_database.csv as player ships
+✓ **Damage System**: Accuracy vs evasion, critical hits, reinforced armor reduction
+✓ **Health Display**: 3-tier bars (shield/armor/energy) above ships, max 32px width
+✓ **Auto-Combat**: Ships auto-target and attack, switch targets every 3 seconds
+✓ **Turn Structure**: Sequential lane combat with player-controlled progression
+✓ **Energy System**: Ships gain 2-4 energy per attack, auto-cast abilities at max
+✓ **Lane Restrictions**: When zoomed, ships only target enemies in same lane
 
 ---
 
 ## Questions Still to Consider
 
 ### Answered ✓
-- ✓ How should ships target enemies in lanes? → Click-to-select targeting system
+- ✓ How should ships target enemies in lanes? → Auto-targeting with 3-second switch timer
 - ✓ How are ship stats stored? → CSV database with ShipDatabase singleton
 - ✓ How do resources display? → ResourceUI at top-left with icons
+- ✓ How exactly does damage calculation work? → Hit chance (1.0 - evasion%), crit chance (1.0 - accuracy%), reinforced armor reduces damage
+- ✓ When do ships generate energy vs auto-attack? → Ships generate 2-4 energy per attack, abilities auto-cast at max energy
+- ✓ Should we have a turn system or real-time combat? → Turn-based with sequential lane combat
+- ✓ How do ship abilities work? → Energy-based, auto-cast when full (effects TBD)
+- ✓ Should enemies auto-target or use AI behavior? → Auto-targeting same as player ships
+- ✓ Lane restrictions? → When zoomed, ships only target same lane
 
 ### Still Open
-- How exactly does damage calculation work? (accuracy vs evasion, reinforced armor)
-- When do ships generate energy vs auto-attack?
 - How do cards interact with deployed ships?
 - What happens when a lane is full?
 - Should ships be able to move between lanes?
 - How do enemy waves spawn and advance? (from right? waves? timing?)
-- Should enemies auto-target or use AI behavior?
 - What triggers the end of combat?
 - How does the pilot system integrate with ship deployment?
-- Should we have a turn system or real-time combat?
-- How do ship abilities work? (energy cost, cooldowns, targeting)
+- What are the actual ability effects for each ship?
+- How does the card system integrate with turn-based combat?
+- Should there be a hand size limit? Discard mechanics?
+- How do players acquire new cards? (rewards, shops, events)
 
 ---
 

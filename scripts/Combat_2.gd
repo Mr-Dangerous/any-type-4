@@ -67,6 +67,20 @@ var selected_target: Dictionary = {}  # Ship being targeted
 var auto_combat_active: bool = false
 var auto_combat_button: Button = null
 
+# Turn-based combat state
+var turn_mode_active: bool = false
+var current_turn_phase: String = "tactical"  # tactical, lane_0, lane_1, lane_2
+var turn_progression_button: Button = null
+var waiting_for_combat_start: bool = false
+
+# Auto-deploy button
+var auto_deploy_button: Button = null
+
+# Combat pause system
+var combat_paused: bool = true  # Start paused in tactical view
+var zoom_timer: Timer = null
+var zoom_timer_label: Label = null
+
 # Idle behavior constants
 const DRIFT_DISTANCE = 10.0  # How far ships drift backward
 const DRIFT_DURATION = 8.0  # How long drift takes (very slow)
@@ -126,6 +140,15 @@ func _ready():
 	# Setup auto-combat button
 	setup_auto_combat_button()
 
+	# Setup auto-deploy button
+	setup_auto_deploy_button()
+
+	# Setup zoom timer label
+	setup_zoom_timer_label()
+
+	# Setup turn progression button
+	setup_turn_progression_button()
+
 	print("Combat_2 initialized with tactical view")
 
 func _process(delta):
@@ -153,6 +176,11 @@ func _process(delta):
 			if child is Sprite2D:
 				var base_pos = child.get_meta("base_position")
 				child.position = base_pos + parallax_offset
+
+	# Update zoom timer label
+	if zoom_timer and zoom_timer_label and zoom_timer_label.visible:
+		var time_left = zoom_timer.time_left
+		zoom_timer_label.text = "LANE %d: %ds" % [zoomed_lane_index + 1, ceil(time_left)]
 
 func setup_backgrounds():
 	# Create static space background (tiled)
@@ -562,13 +590,16 @@ func _input(event):
 				deploy_enemy_to_lane(selected_enemy_type, lane_index)
 				selected_enemy_type = ""  # Clear selection after deployment
 		else:
-			# Check if clicking on a ship for combat targeting
-			var clicked_unit = get_unit_at_position(mouse_pos)
-			if clicked_unit != null:
-				handle_unit_click(clicked_unit)
-			elif not is_zoomed and lane_index != -1:
-				# No ship selected and not zoomed - zoom into lane
+			# In tactical view (paused): prioritize lane zoom
+			# But prevent manual zoom when turn mode is active
+			if combat_paused and not is_zoomed and lane_index != -1 and not turn_mode_active:
+				# Tactical view - zoom into lane
 				zoom_to_lane(lane_index)
+			elif is_zoomed:
+				# Zoomed view - allow unit clicking for combat
+				var clicked_unit = get_unit_at_position(mouse_pos)
+				if clicked_unit != null and not clicked_unit.is_empty():
+					handle_unit_click(clicked_unit)
 
 func get_lane_at_position(pos: Vector2) -> int:
 	# Determine which lane a position is in
@@ -788,7 +819,13 @@ func deploy_ship_to_lane(ship_type: String, lane_index: int):
 		# Combat stats
 		"stats": db_ship_data["stats"].duplicate(),
 		"current_armor": db_ship_data["stats"]["armor"],
-		"current_shield": db_ship_data["stats"]["shield"]
+		"current_shield": db_ship_data["stats"]["shield"],
+		"current_energy": db_ship_data["stats"]["starting_energy"],
+
+		# Ability data
+		"ability_function": db_ship_data.get("ability_function", ""),
+		"ability_name": db_ship_data.get("abilty", ""),
+		"ability_description": db_ship_data.get("ability_description", "")
 	}
 
 	# Add to lane data
@@ -796,6 +833,9 @@ func deploy_ship_to_lane(ship_type: String, lane_index: int):
 
 	# Create health bar
 	create_health_bar(ship_container, ship_size, ship_data["current_shield"], ship_data["current_armor"])
+
+	# Initialize energy bar
+	update_energy_bar(ship_data)
 
 	# Start idle behavior
 	start_ship_idle_behavior(ship_data)
@@ -869,7 +909,13 @@ func deploy_enemy_to_lane(enemy_type: String, lane_index: int):
 		# Combat stats
 		"stats": db_enemy_data["stats"].duplicate(),
 		"current_armor": db_enemy_data["stats"]["armor"],
-		"current_shield": db_enemy_data["stats"]["shield"]
+		"current_shield": db_enemy_data["stats"]["shield"],
+		"current_energy": db_enemy_data["stats"]["starting_energy"],
+
+		# Ability data
+		"ability_function": db_enemy_data.get("ability_function", ""),
+		"ability_name": db_enemy_data.get("abilty", ""),
+		"ability_description": db_enemy_data.get("ability_description", "")
 	}
 
 	# Add to lane data
@@ -877,6 +923,9 @@ func deploy_enemy_to_lane(enemy_type: String, lane_index: int):
 
 	# Create health bar
 	create_health_bar(enemy_container, enemy_size, enemy_data["current_shield"], enemy_data["current_armor"])
+
+	# Initialize energy bar
+	update_energy_bar(enemy_data)
 
 	print("Enemy deployed successfully at x=", x_pos, " y=", target_y, " with size=", enemy_size, " | Stats: Armor=", db_enemy_data["stats"]["armor"], " Shield=", db_enemy_data["stats"]["shield"], " AttackSpeed=", db_enemy_data["stats"]["attack_speed"])
 
@@ -994,6 +1043,68 @@ func setup_auto_combat_button():
 	auto_combat_button.pressed.connect(_on_auto_combat_toggled)
 	add_child(auto_combat_button)
 
+func setup_auto_deploy_button():
+	# Create auto-deploy button
+	auto_deploy_button = Button.new()
+	auto_deploy_button.name = "AutoDeployButton"
+	auto_deploy_button.text = "AUTO-DEPLOY"
+	auto_deploy_button.position = Vector2(450, 80)  # Below auto-combat button
+	auto_deploy_button.size = Vector2(250, 50)
+	auto_deploy_button.add_theme_font_size_override("font_size", 18)
+	auto_deploy_button.pressed.connect(_on_auto_deploy_pressed)
+	add_child(auto_deploy_button)
+
+func setup_zoom_timer_label():
+	# Create zoom timer countdown label
+	zoom_timer_label = Label.new()
+	zoom_timer_label.name = "ZoomTimerLabel"
+	zoom_timer_label.text = "LANE 1: 5s"
+	zoom_timer_label.position = Vector2(400, 150)  # Top center, below other buttons
+	zoom_timer_label.add_theme_font_size_override("font_size", 28)
+	zoom_timer_label.add_theme_color_override("font_color", Color(1.0, 0.8, 0.2, 1.0))  # Bright yellow/gold
+	zoom_timer_label.visible = false  # Hidden by default
+
+	# Add to UI layer so it's not affected by camera zoom
+	ui_layer.add_child(zoom_timer_label)
+
+func setup_turn_progression_button():
+	# Create turn progression button in bottom-right corner
+	turn_progression_button = Button.new()
+	turn_progression_button.name = "TurnProgressionButton"
+	turn_progression_button.text = "Proceed to Lane 1"
+	turn_progression_button.position = Vector2(850, 580)  # Bottom-right
+	turn_progression_button.size = Vector2(280, 50)
+	turn_progression_button.add_theme_font_size_override("font_size", 20)
+	turn_progression_button.visible = false  # Hidden until turn mode starts
+	turn_progression_button.pressed.connect(_on_turn_progression_pressed)
+
+	# Add to UI layer so it's not affected by camera zoom
+	ui_layer.add_child(turn_progression_button)
+
+func _on_auto_deploy_pressed():
+	# Auto-deploy player ships and enemies
+	print("Auto-deploying ships and enemies...")
+
+	# Deploy player ships
+	# Lane 1 (index 0): Interceptor
+	deploy_ship_to_lane("basic_interceptor", 0)
+
+	# Lane 2 (index 1): Fighter
+	deploy_ship_to_lane("basic_fighter", 1)
+
+	# Lane 3 (index 2): Frigate
+	deploy_ship_to_lane("basic_shield_frigate", 2)
+
+	# Wait a moment for player ships to start deploying
+	await get_tree().create_timer(0.5).timeout
+
+	# Deploy enemies: 1 mook and 1 elite in each lane
+	for lane_idx in range(3):
+		deploy_enemy_to_lane("mook", lane_idx)
+		deploy_enemy_to_lane("elite", lane_idx)
+
+	print("Auto-deploy complete!")
+
 func zoom_to_lane(lane_index: int):
 	# Zoom camera to focus on specific lane
 	print("Zooming to lane ", lane_index)
@@ -1012,15 +1123,55 @@ func zoom_to_lane(lane_index: int):
 	tween.tween_property(camera, "position", target_position, 0.5)
 	tween.tween_property(camera, "zoom", Vector2(1.5, 1.5), 0.5)
 
-	# Show return button
-	return_button.visible = true
+	# Show return button (only if not in turn mode)
+	if not turn_mode_active:
+		return_button.visible = true
 
-	# Hide deploy button while zoomed
+	# Hide deploy buttons while zoomed
 	deploy_button.visible = false
+	deploy_enemy_button.visible = false
+	auto_deploy_button.visible = false
+
+	# Move ships in this lane into combat positions and wait for completion
+	await move_lane_ships_forward(lane_index)
+
+	# In turn mode, wait for player to click "Start Combat"
+	# In normal mode, start combat immediately
+	if not turn_mode_active:
+		# Unpause combat for this lane
+		combat_paused = false
+		print("Combat UNPAUSED - lane active")
+
+		# Start combat for all ships in this lane
+		start_lane_combat(lane_index)
+
+		# Start 5-second timer to auto-return (AFTER ships are in position)
+		start_zoom_timer()
+	else:
+		print("Zoomed to lane ", lane_index, " - waiting for player to start combat")
 
 func _on_return_to_tactical():
 	# Return to tactical view
 	print("Returning to tactical view")
+
+	# Cancel zoom timer if active
+	stop_zoom_timer()
+
+	# Hide timer label
+	if zoom_timer_label:
+		zoom_timer_label.visible = false
+
+	# Pause combat
+	combat_paused = true
+	print("Combat PAUSED - tactical view")
+
+	# Stop combat for the zoomed lane
+	var prev_lane_index = zoomed_lane_index
+	if prev_lane_index != -1:
+		stop_lane_combat(prev_lane_index)
+		# Return ships to their formation positions
+		return_lane_ships_to_formation(prev_lane_index)
+
 	is_zoomed = false
 	zoomed_lane_index = -1
 
@@ -1035,14 +1186,124 @@ func _on_return_to_tactical():
 	# Hide return button
 	return_button.visible = false
 
-	# Show deploy button again
+	# Show deploy buttons again
 	deploy_button.visible = true
+	deploy_enemy_button.visible = true
+	auto_deploy_button.visible = true
+
+# Lane ship movement functions
+
+func move_lane_ships_forward(lane_index: int):
+	# Move all ships in lane to combat positions (player ships forward, enemies toward player)
+	if lane_index < 0 or lane_index >= lanes.size():
+		return
+
+	var lane = lanes[lane_index]
+	var movement_tweens = []
+
+	for unit in lane["units"]:
+		if not unit.has("container"):
+			continue
+
+		var container = unit["container"]
+		var current_pos = container.position
+		var is_enemy = unit.get("is_enemy", false)
+
+		# Save original position for returning later
+		unit["zoom_original_position"] = current_pos
+
+		# Determine movement direction:
+		# Player ships move forward (+200px to right)
+		# Enemy ships move backward (-200px to left, toward player)
+		var offset = -200 if is_enemy else 200
+		var target_pos = Vector2(current_pos.x + offset, current_pos.y)
+
+		# Animate movement
+		var tween = create_tween()
+		tween.set_trans(Tween.TRANS_CUBIC)
+		tween.set_ease(Tween.EASE_IN_OUT)
+		tween.tween_property(container, "position", target_pos, 0.5)
+		movement_tweens.append(tween)
+
+	print("Moved ships in lane ", lane_index, " into combat positions")
+
+	# Wait for all tweens to complete
+	if movement_tweens.size() > 0:
+		# Wait for the first tween (they all have same duration)
+		await movement_tweens[0].finished
+
+func return_lane_ships_to_formation(lane_index: int):
+	# Return all ships in lane to their formation positions
+	if lane_index < 0 or lane_index >= lanes.size():
+		return
+
+	var lane = lanes[lane_index]
+	for unit in lane["units"]:
+		if not unit.has("container") or not unit.has("zoom_original_position"):
+			continue
+
+		var container = unit["container"]
+		var original_pos = unit["zoom_original_position"]
+
+		# Animate movement back
+		var tween = create_tween()
+		tween.set_trans(Tween.TRANS_CUBIC)
+		tween.set_ease(Tween.EASE_IN_OUT)
+		tween.tween_property(container, "position", original_pos, 0.5)
+
+		# Clear saved position
+		unit.erase("zoom_original_position")
+
+	print("Returned ships in lane ", lane_index, " to formation")
+
+func start_zoom_timer():
+	# Start 5-second timer for auto-return to tactical view
+	if zoom_timer:
+		zoom_timer.queue_free()
+
+	zoom_timer = Timer.new()
+	zoom_timer.name = "ZoomTimer"
+	zoom_timer.wait_time = 5.0
+	zoom_timer.one_shot = true
+	zoom_timer.timeout.connect(_on_zoom_timer_timeout)
+	add_child(zoom_timer)
+	zoom_timer.start()
+
+	# Show and initialize timer label
+	if zoom_timer_label:
+		zoom_timer_label.text = "LANE %d: 5s" % [zoomed_lane_index + 1]
+		zoom_timer_label.visible = true
+
+	print("Started 5-second zoom timer")
+
+func stop_zoom_timer():
+	# Stop and remove zoom timer
+	if zoom_timer:
+		zoom_timer.stop()
+		zoom_timer.queue_free()
+		zoom_timer = null
+
+func _on_zoom_timer_timeout():
+	# Handle zoom timer expiring
+	if turn_mode_active:
+		# In turn mode - progress to next phase
+		print("Zoom timer expired - combat phase complete")
+		on_combat_phase_complete()
+	else:
+		# Normal mode - auto-return to tactical view
+		print("Zoom timer expired - auto-returning to tactical view")
+		_on_return_to_tactical()
 
 # Combat system functions
 
 func start_attack_sequence():
 	# Begin the attack sequence: rotate ship, then fire
 	if selected_attacker.is_empty() or selected_target.is_empty():
+		return
+
+	# Don't allow manual combat in paused state
+	if combat_paused:
+		print("Combat is paused - cannot start manual attack")
 		return
 
 	print("Starting attack sequence")
@@ -1099,6 +1360,9 @@ func fire_laser():
 			# Add small delay between projectiles (0.05s)
 			await get_tree().create_timer(0.05).timeout
 		fire_single_laser()
+
+	# Gain energy after attack (2-4 random)
+	gain_energy(selected_attacker)
 
 func fire_single_laser():
 	# Fire a single laser projectile from attacker to target
@@ -1263,6 +1527,11 @@ func start_continuous_attack():
 func attack_cycle(attacker: Dictionary, target: Dictionary, attack_interval: float):
 	# Continuous attack cycle
 	while not attacker.is_empty() and not target.is_empty():
+		# Stop if combat is paused
+		if combat_paused:
+			print("Attack cycle stopped - combat paused")
+			break
+
 		# Check if still attacking same target
 		if selected_attacker != attacker or selected_target != target:
 			break
@@ -1339,17 +1608,197 @@ func destroy_ship(ship: Dictionary):
 # Auto-combat functions
 
 func _on_auto_combat_toggled():
-	# Toggle auto-combat mode
-	auto_combat_active = !auto_combat_active
+	# Toggle turn-based combat mode
+	turn_mode_active = !turn_mode_active
 
-	if auto_combat_active:
-		auto_combat_button.text = "STOP AUTO-COMBAT"
-		start_auto_combat()
-		print("Auto-combat STARTED")
+	if turn_mode_active:
+		auto_combat_button.text = "STOP TURN MODE"
+		start_turn_mode()
+		print("Turn mode STARTED")
 	else:
 		auto_combat_button.text = "START AUTO-COMBAT"
-		stop_auto_combat()
-		print("Auto-combat STOPPED")
+		stop_turn_mode()
+		print("Turn mode STOPPED")
+
+# Turn-based combat functions
+
+func start_turn_mode():
+	# Start turn-based combat mode
+	current_turn_phase = "tactical"
+	waiting_for_combat_start = false
+
+	# Show turn progression button
+	if turn_progression_button:
+		turn_progression_button.text = "Proceed to Lane 1"
+		turn_progression_button.visible = true
+
+	# Hide return button in turn mode (no manual returns allowed)
+	if return_button:
+		return_button.visible = false
+
+	print("Turn mode started - Tactical phase")
+
+func stop_turn_mode():
+	# Stop turn-based combat mode
+	turn_mode_active = false
+	current_turn_phase = "tactical"
+	waiting_for_combat_start = false
+
+	# Hide turn progression button
+	if turn_progression_button:
+		turn_progression_button.visible = false
+
+	# Stop any active combat
+	if is_zoomed:
+		_on_return_to_tactical()
+
+	print("Turn mode stopped")
+
+func _on_turn_progression_pressed():
+	# Handle turn progression button press
+	if waiting_for_combat_start:
+		# Player clicked "Start Combat" - begin the combat phase
+		start_combat_phase()
+	else:
+		# Player clicked "Proceed to Lane X" - zoom to the next lane
+		proceed_to_next_lane()
+
+func proceed_to_next_lane():
+	# Zoom to the appropriate lane based on current phase
+	var target_lane = -1
+
+	if current_turn_phase == "tactical":
+		target_lane = 0
+		current_turn_phase = "lane_0"
+	elif current_turn_phase == "lane_0":
+		target_lane = 1
+		current_turn_phase = "lane_1"
+	elif current_turn_phase == "lane_1":
+		target_lane = 2
+		current_turn_phase = "lane_2"
+
+	if target_lane >= 0:
+		# Zoom to the lane
+		zoom_to_lane(target_lane)
+
+		# Update button to "Start Combat"
+		waiting_for_combat_start = true
+		if turn_progression_button:
+			turn_progression_button.text = "Start Combat"
+
+func start_combat_phase():
+	# Start combat in the current zoomed lane
+	if not is_zoomed or zoomed_lane_index < 0:
+		print("ERROR: Trying to start combat but not zoomed into a lane")
+		return
+
+	# Hide the button during combat
+	if turn_progression_button:
+		turn_progression_button.visible = false
+
+	waiting_for_combat_start = false
+
+	# Unpause combat
+	combat_paused = false
+	print("Combat UNPAUSED - lane active")
+
+	# Start lane combat (this will assign targets and begin attacks)
+	start_lane_combat(zoomed_lane_index)
+
+	# Start 5-second timer
+	start_zoom_timer()
+
+	print("Combat started for lane ", zoomed_lane_index)
+
+func on_combat_phase_complete():
+	# Called when combat timer expires - move to next phase
+	print("Combat phase complete for lane ", zoomed_lane_index)
+
+	# Determine next action based on current phase
+	if current_turn_phase == "lane_0":
+		# Move to lane 1
+		proceed_to_lane_transition(1, "lane_1")
+	elif current_turn_phase == "lane_1":
+		# Move to lane 2
+		proceed_to_lane_transition(2, "lane_2")
+	elif current_turn_phase == "lane_2":
+		# All lanes complete - return to tactical
+		return_to_tactical_phase()
+
+func proceed_to_lane_transition(next_lane_index: int, next_phase: String):
+	# Transition to the next lane
+	print("Transitioning to lane ", next_lane_index)
+
+	# Stop current lane combat
+	stop_lane_combat(zoomed_lane_index)
+
+	# Update phase
+	current_turn_phase = next_phase
+
+	# Zoom to next lane
+	zoom_to_lane(next_lane_index)
+
+	# Show button and wait for player
+	waiting_for_combat_start = true
+	if turn_progression_button:
+		turn_progression_button.text = "Start Combat"
+		turn_progression_button.visible = true
+
+func return_to_tactical_phase():
+	# Return to tactical view and reset turn cycle
+	print("All lanes complete - returning to tactical view")
+
+	# Stop combat and return to tactical
+	_on_return_to_tactical()
+
+	# Reset to tactical phase
+	current_turn_phase = "tactical"
+	waiting_for_combat_start = false
+
+	# Show proceed button for next turn
+	if turn_progression_button:
+		turn_progression_button.text = "Proceed to Lane 1"
+		turn_progression_button.visible = true
+
+func start_lane_combat(lane_index: int):
+	# Start combat for all ships in a specific lane (when zoomed in)
+	if lane_index < 0 or lane_index >= lanes.size():
+		return
+
+	var lane = lanes[lane_index]
+	print("Starting combat for lane ", lane_index, " with ", lane["units"].size(), " units")
+
+	for unit in lane["units"]:
+		# Assign random target (will be restricted to same lane due to is_zoomed)
+		assign_random_target(unit)
+		# Start target switching timer (switches every 3 seconds)
+		start_target_switch_timer(unit)
+
+func stop_lane_combat(lane_index: int):
+	# Stop combat for all ships in a specific lane
+	if lane_index < 0 or lane_index >= lanes.size():
+		return
+
+	var lane = lanes[lane_index]
+	print("Stopping combat for lane ", lane_index)
+
+	for unit in lane["units"]:
+		# Stop attack timers
+		if unit.has("container"):
+			var container = unit["container"]
+			var attack_timer = container.get_node_or_null("AttackTimer")
+			if attack_timer:
+				attack_timer.stop()
+				attack_timer.queue_free()
+			var switch_timer = container.get_node_or_null("TargetSwitchTimer")
+			if switch_timer:
+				switch_timer.stop()
+				switch_timer.queue_free()
+		# Clear auto-combat data
+		unit.erase("auto_target")
+		# Reset sprite modulation
+		if unit.has("sprite"):
+			unit["sprite"].modulate = Color(1, 1, 1)
 
 func start_auto_combat():
 	# Start auto-combat: all ships attack random enemies
@@ -1382,16 +1831,32 @@ func stop_auto_combat():
 			if unit.has("sprite"):
 				unit["sprite"].modulate = Color(1, 1, 1)
 
-func assign_random_target(unit: Dictionary):
+func assign_random_target(unit: Dictionary, restrict_to_lane: int = -1):
 	# Assign a random enemy target to a unit
+	# If restrict_to_lane >= 0, only target ships in that lane
 	if unit.is_empty():
 		return
 
 	var is_enemy = unit.get("is_enemy", false)
 	var potential_targets: Array[Dictionary] = []
 
+	# Determine which lane this unit is in
+	var unit_lane_index = -1
+	for lane in lanes:
+		if lane["units"].has(unit):
+			unit_lane_index = lane["index"]
+			break
+
 	# Find all valid targets (opposite faction)
 	for lane in lanes:
+		# Skip lanes if we're restricting to a specific lane
+		if restrict_to_lane >= 0 and lane["index"] != restrict_to_lane:
+			continue
+
+		# When in zoomed mode, only target ships in the same lane
+		if is_zoomed and lane["index"] != unit_lane_index:
+			continue
+
 		for other_unit in lane["units"]:
 			var other_is_enemy = other_unit.get("is_enemy", false)
 			if is_enemy != other_is_enemy:  # Opposite factions
@@ -1495,7 +1960,14 @@ func auto_rotate_to_target(attacker: Dictionary, target: Dictionary):
 
 func auto_attack_cycle(attacker: Dictionary, target: Dictionary, attack_interval: float):
 	# Continuous auto-attack cycle
-	while auto_combat_active and not attacker.is_empty() and not target.is_empty():
+	# Continue attacking while auto-combat is active OR while zoomed into a lane
+	while (auto_combat_active or is_zoomed) and not attacker.is_empty() and not target.is_empty():
+		# Stop if combat is paused
+		if combat_paused:
+			# Wait for combat to unpause
+			await get_tree().create_timer(0.1).timeout
+			continue
+
 		# Check if target is still assigned and valid
 		var current_target = attacker.get("auto_target")
 		if current_target != target or not is_instance_valid(target.get("container")):
@@ -1527,6 +1999,9 @@ func auto_fire_laser(attacker: Dictionary, target: Dictionary):
 		if i > 0:
 			await get_tree().create_timer(0.05).timeout
 		auto_fire_single_laser(attacker, target)
+
+	# Gain energy after attack (2-4 random)
+	gain_energy(attacker)
 
 func auto_fire_single_laser(attacker: Dictionary, target: Dictionary):
 	# Fire a single laser in auto-combat
@@ -1594,6 +2069,61 @@ func auto_on_laser_hit(laser: Sprite2D, attacker: Dictionary, target: Dictionary
 		flash_tween.tween_property(target_sprite, "modulate", Color(1.0, 1.0, 1.0, 1.0), 0.1)
 
 
+# Energy system functions
+
+func gain_energy(unit: Dictionary):
+	# Gain 2-4 random energy after each attack
+	if unit.is_empty():
+		return
+
+	# Don't gain energy when combat is paused
+	if combat_paused:
+		return
+
+	# Skip if unit has no energy system (max energy = 0)
+	var max_energy = unit["stats"].get("energy", 0)
+	if max_energy <= 0:
+		return
+
+	# Random energy gain: 2, 3, or 4
+	var energy_gain = randi_range(2, 4)
+	var current_energy = unit.get("current_energy", 0)
+
+	unit["current_energy"] = current_energy + energy_gain
+	print(unit.get("type", "unknown"), " gained ", energy_gain, " energy (", unit["current_energy"], "/", max_energy, ")")
+
+	# Update energy bar
+	update_energy_bar(unit)
+
+	# Check if energy is full
+	if unit["current_energy"] >= max_energy:
+		cast_ability(unit)
+
+func cast_ability(unit: Dictionary):
+	# Cast unit's ability when energy is full
+	if unit.is_empty():
+		return
+
+	var ability_name = unit.get("ability_name", "")
+	var ability_function = unit.get("ability_function", "")
+
+	if ability_name == "":
+		print(unit.get("type", "unknown"), " has no ability to cast")
+		return
+
+	print("=== ABILITY CAST ===")
+	print(unit.get("type", "unknown"), " casts: ", ability_name)
+	print("Description: ", unit.get("ability_description", "No description"))
+	print("Function: ", ability_function)
+	print("====================")
+
+	# Reset energy to 0
+	unit["current_energy"] = 0
+	update_energy_bar(unit)
+
+	# TODO: Actually call the ability function when implemented
+	# For now just print to console
+
 # Health bar functions
 
 func create_health_bar(ship_container: Control, ship_size: int, max_shield: int, max_armor: int):
@@ -1601,18 +2131,26 @@ func create_health_bar(ship_container: Control, ship_size: int, max_shield: int,
 	var bar_width = min(32, ship_size)  # Cap at 32 pixels
 	var health_bar_container = Control.new()
 	health_bar_container.name = "HealthBar"
-	health_bar_container.position = Vector2((ship_size - bar_width) / 2, -15)  # Center above ship
-	health_bar_container.size = Vector2(bar_width, 8)
+	health_bar_container.position = Vector2((ship_size - bar_width) / 2, -18)  # Center above ship, raised a bit for 3-bar layout
+	health_bar_container.size = Vector2(bar_width, 12)
 	ship_container.add_child(health_bar_container)
 
 	# Background (dark gray)
 	var bg = ColorRect.new()
 	bg.name = "Background"
 	bg.color = Color(0.2, 0.2, 0.2, 0.8)
-	bg.size = Vector2(bar_width, 8)
+	bg.size = Vector2(bar_width, 12)
 	health_bar_container.add_child(bg)
 
-	# Armor bar (red/orange)
+	# Shield bar (cyan/blue) - top
+	var shield_bar = ColorRect.new()
+	shield_bar.name = "ShieldBar"
+	shield_bar.color = Color(0.2, 0.7, 1.0, 1.0)
+	shield_bar.size = Vector2(bar_width, 4)
+	shield_bar.position = Vector2(0, 0)
+	health_bar_container.add_child(shield_bar)
+
+	# Armor bar (red/orange) - middle
 	var armor_bar = ColorRect.new()
 	armor_bar.name = "ArmorBar"
 	armor_bar.color = Color(0.8, 0.3, 0.2, 1.0)
@@ -1620,13 +2158,13 @@ func create_health_bar(ship_container: Control, ship_size: int, max_shield: int,
 	armor_bar.position = Vector2(0, 4)
 	health_bar_container.add_child(armor_bar)
 
-	# Shield bar (cyan/blue)
-	var shield_bar = ColorRect.new()
-	shield_bar.name = "ShieldBar"
-	shield_bar.color = Color(0.2, 0.7, 1.0, 1.0)
-	shield_bar.size = Vector2(bar_width, 4)
-	shield_bar.position = Vector2(0, 0)
-	health_bar_container.add_child(shield_bar)
+	# Energy bar (purple) - bottom
+	var energy_bar = ColorRect.new()
+	energy_bar.name = "EnergyBar"
+	energy_bar.color = Color(0.7, 0.2, 1.0, 1.0)  # Purple
+	energy_bar.size = Vector2(bar_width, 4)
+	energy_bar.position = Vector2(0, 8)
+	health_bar_container.add_child(energy_bar)
 
 func update_health_bar(ship: Dictionary):
 	# Update health bar to reflect current health
@@ -1656,6 +2194,34 @@ func update_health_bar(ship: Dictionary):
 	if shield_bar and max_shield > 0:
 		var shield_percent = float(current_shield) / float(max_shield)
 		shield_bar.size.x = bar_width * shield_percent
+
+	# Also update energy bar
+	update_energy_bar(ship)
+
+func update_energy_bar(ship: Dictionary):
+	# Update energy bar to reflect current energy
+	if not ship.has("container"):
+		return
+
+	var container = ship["container"]
+	var health_bar_container = container.get_node_or_null("HealthBar")
+	if not health_bar_container:
+		return
+
+	var ship_size = ship["size"]
+	var bar_width = min(32, ship_size)  # Cap at 32 pixels
+	var max_energy = ship["stats"].get("energy", 0)
+	var current_energy = ship.get("current_energy", 0)
+
+	# Update energy bar width
+	var energy_bar = health_bar_container.get_node_or_null("EnergyBar")
+	if energy_bar:
+		if max_energy > 0:
+			var energy_percent = float(current_energy) / float(max_energy)
+			energy_bar.size.x = bar_width * energy_percent
+		else:
+			# No energy system, hide the bar
+			energy_bar.size.x = 0
 
 # Stat helper functions
 
