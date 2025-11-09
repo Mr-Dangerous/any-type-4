@@ -2,60 +2,7 @@ extends Node2D
 
 # Tactical view combat system with 3 horizontal lanes
 
-# Lane configuration
-const NUM_LANES = 3
-const LANE_Y_START = 200.0
-const LANE_SPACING = 150.0
-
-# Position constants
-const MOTHERSHIP_X = 100.0
-const ENEMY_SPAWN_X = 1000.0
-const SHIP_DEPLOY_X_START = 280.0  # Where first ship deploys
-const SHIP_SPACING = 40.0  # Horizontal spacing between ships in same lane
-
-# Grid system constants
-const GRID_ROWS = 4  # Height of each lane grid
-const GRID_COLS = 16  # Width of each lane grid
-const CELL_SIZE = 32  # Size of each grid cell in pixels
-const GRID_START_X = 400.0  # Where the grid starts horizontally
-const PLAYER_DEPLOY_COLS = [0, 1, 2, 3]  # Columns 0-3 for player deployment
-const ENEMY_DEPLOY_COLS = [12, 13, 14, 15]  # Columns 12-15 for enemy deployment (last 4 columns)
-
-# Turret constants
-const TURRET_X_OFFSET = 180.0  # Slightly in front of mothership
-const TURRET_SIZE = 100  # Turrets are larger than regular ships
-const SECONDARY_TURRET_X_OFFSET = 280
-# Ship size classes (width in pixels)
-const SIZE_TINY = 20  # 32-48 range, using middle value
-const SIZE_SMALL = 24  # 40-56 range, using middle value
-const SIZE_MEDIUM = 36  # 48-64 range, using middle value
-const SIZE_LARGE = 48  # 64-128 range, using middle value
-const SIZE_EXTRA_LARGE = 80  # 128-192 range, using middle value
-
-# Ship data is now loaded from card_database/ship_database.csv via ShipDatabase singleton
-# SHIP_SIZES, SHIP_DEPLOY_SPEED, and SHIP_STATS have been removed
-# Use ShipDatabase.get_ship_data(ship_id) to access ship properties
-
-# Preload ship textures
-const MothershipTexture = preload("res://assets/Ships/illum_default/s_illum_default_24.png")
-const InterceptorTexture = preload("res://assets/Ships/illum_default/s_illum_default_23.png")
-const FighterTexture = preload("res://assets/Ships/illum_default/s_illum_default_19.png")
-const FrigateTexture = preload("res://assets/Ships/illum_default/s_illum_default_01.png")
-
-# Preload enemy textures
-const MookTexture = preload("res://assets/Ships/alien/s_alien_09.png")
-const EliteTexture = preload("res://assets/Ships/alien/s_alien_05.png")
-
-# Preload UI textures
-const CloseButtonTexture = preload("res://assets/UI/Close_BTN/Close_BTN.png")
-
-# Preload background textures
-const Space2Texture = preload("res://assets/Backgrounds/Space2/Bright/Space2.png")
-const Stones1Texture = preload("res://assets/Backgrounds/Space2/Bright/stones1.png")
-
-# Preload combat effects
-const LaserTexture = preload("res://assets/Effects/laser_light/s_laser_light_001.png")
-
+# Constants and resources now loaded from CombatConstants autoload singleton
 # Game state
 var lanes: Array[Dictionary] = []  # Each lane can contain units
 var lane_grids: Array = []  # Grid occupancy tracking: [lane_index][row][col] -> unit or null
@@ -104,10 +51,6 @@ var zoom_timer: Timer = null
 var zoom_timer_label: Label = null
 
 # Idle behavior constants
-const DRIFT_DISTANCE = 10.0  # How far ships drift backward
-const DRIFT_DURATION = 8.0  # How long drift takes (very slow)
-const DRIFT_DELAY = 3.0  # Delay before starting drift
-const RETURN_DURATION = 2.0  # How long return takes
 
 # Background variables
 var bg_scroll_direction: Vector2 = Vector2(1, 0)  # Direction of parallax scroll
@@ -118,6 +61,12 @@ var parallax_offset: Vector2 = Vector2.ZERO  # Current parallax offset
 # Background nodes
 var space_background: Node2D = null
 var parallax_background: Node2D = null
+
+# Debug system
+var debug_panel: Panel = null
+var debug_button: Button = null
+var player_targeting_mode: String = "alpha"  # "random" or "alpha"
+var enemy_targeting_mode: String = "alpha"   # "random" or "alpha"
 
 func _ready():
 	# Hide the existing solid background so we can see our space backgrounds
@@ -162,6 +111,9 @@ func _ready():
 	# Setup return button (initially hidden)
 	setup_return_button()
 
+	# Setup debug UI
+	setup_debug_ui()
+
 	# Setup auto-combat button
 	setup_auto_combat_button()
 
@@ -182,8 +134,8 @@ func _process(delta):
 		parallax_offset += bg_scroll_direction.normalized() * bg_scroll_speed * delta
 
 		# Get texture size for wrapping
-		var tex_width = Stones1Texture.get_width()
-		var tex_height = Stones1Texture.get_height()
+		var tex_width = CombatConstants.Stones1Texture.get_width()
+		var tex_height = CombatConstants.Stones1Texture.get_height()
 
 		# Wrap the offset to create seamless loop
 		if parallax_offset.x > tex_width:
@@ -216,17 +168,17 @@ func setup_backgrounds():
 
 	# Tile Space2.png across the screen
 	var screen_size = Vector2(1152, 648)
-	var tex_size = Space2Texture.get_size() * bg_tile_size
+	var tex_size = CombatConstants.Space2Texture.get_size() * bg_tile_size
 	var tiles_x = ceil(screen_size.x / tex_size.x) + 1
 	var tiles_y = ceil(screen_size.y / tex_size.y) + 1
 
 	print("Creating space background tiles: ", tiles_x, "x", tiles_y)
-	print("Space2 texture size: ", Space2Texture.get_size())
+	print("Space2 texture size: ", CombatConstants.Space2Texture.get_size())
 
 	for x in range(tiles_x):
 		for y in range(tiles_y):
 			var sprite = Sprite2D.new()
-			sprite.texture = Space2Texture
+			sprite.texture = CombatConstants.Space2Texture
 			sprite.scale = Vector2(bg_tile_size, bg_tile_size)
 			sprite.position = Vector2(x * tex_size.x, y * tex_size.y)
 			sprite.centered = false
@@ -240,13 +192,13 @@ func setup_backgrounds():
 	add_child(parallax_background)
 
 	# Create a 3x3 grid of stones for seamless scrolling
-	var stones_tex_size = Stones1Texture.get_size()
+	var stones_tex_size = CombatConstants.Stones1Texture.get_size()
 	print("Creating parallax stones, texture size: ", stones_tex_size)
 
 	for x in range(-1, 2):
 		for y in range(-1, 2):
 			var sprite = Sprite2D.new()
-			sprite.texture = Stones1Texture
+			sprite.texture = CombatConstants.Stones1Texture
 			sprite.centered = false
 			sprite.modulate.a = 0.7  # Make slightly transparent
 			var base_pos = Vector2(x * stones_tex_size.x, y * stones_tex_size.y)
@@ -266,14 +218,14 @@ func update_background_tiles():
 
 		# Create new tiles
 		var screen_size = Vector2(1152, 648)
-		var tex_size = Space2Texture.get_size() * bg_tile_size
+		var tex_size = CombatConstants.Space2Texture.get_size() * bg_tile_size
 		var tiles_x = ceil(screen_size.x / tex_size.x) + 1
 		var tiles_y = ceil(screen_size.y / tex_size.y) + 1
 
 		for x in range(tiles_x):
 			for y in range(tiles_y):
 				var sprite = Sprite2D.new()
-				sprite.texture = Space2Texture
+				sprite.texture = CombatConstants.Space2Texture
 				sprite.scale = Vector2(bg_tile_size, bg_tile_size)
 				sprite.position = Vector2(x * tex_size.x, y * tex_size.y)
 				sprite.centered = false
@@ -281,19 +233,19 @@ func update_background_tiles():
 
 func initialize_lanes():
 	# Create 3 lanes
-	for i in range(NUM_LANES):
+	for i in range(CombatConstants.NUM_LANES):
 		var lane = {
 			"index": i,
-			"y_position": LANE_Y_START + (i * LANE_SPACING),
+			"y_position": CombatConstants.LANE_Y_START + (i * CombatConstants.LANE_SPACING),
 			"units": []
 		}
 		lanes.append(lane)
 
 		# Initialize grid for this lane (4 rows x 10 columns)
 		var grid = []
-		for row in range(GRID_ROWS):
+		for row in range(CombatConstants.GRID_ROWS):
 			var grid_row = []
-			for col in range(GRID_COLS):
+			for col in range(CombatConstants.GRID_COLS):
 				grid_row.append(null)  # null = empty cell
 			grid.append(grid_row)
 		lane_grids.append(grid)
@@ -303,13 +255,13 @@ func initialize_lanes():
 
 func create_lane_marker(lane_index: int, y_pos: float):
 	# Create a rectangle to visualize the lane with grid
-	var lane_width = GRID_COLS * CELL_SIZE
-	var lane_height = GRID_ROWS * CELL_SIZE
+	var lane_width = CombatConstants.GRID_COLS * CombatConstants.CELL_SIZE
+	var lane_height = CombatConstants.GRID_ROWS * CombatConstants.CELL_SIZE
 
 	# Position lane so its center aligns with y_pos
 	var lane_rect = ColorRect.new()
 	lane_rect.name = "Lane_%d" % lane_index
-	lane_rect.position = Vector2(GRID_START_X, y_pos - lane_height / 2)
+	lane_rect.position = Vector2(CombatConstants.GRID_START_X, y_pos - lane_height / 2)
 	lane_rect.size = Vector2(lane_width, lane_height)
 	lane_rect.color = Color(0.2, 0.4, 0.8, 0.2)  # Semi-transparent blue
 	add_child(lane_rect)
@@ -322,25 +274,25 @@ func create_lane_marker(lane_index: int, y_pos: float):
 	lane_rect.add_child(border)
 
 	# Draw grid lines for each cell
-	for row in range(GRID_ROWS + 1):
+	for row in range(CombatConstants.GRID_ROWS + 1):
 		var line = ColorRect.new()
-		line.position = Vector2(0, row * CELL_SIZE)
+		line.position = Vector2(0, row * CombatConstants.CELL_SIZE)
 		line.size = Vector2(lane_width, 1)
 		line.color = Color(0.3, 0.5, 1.0, 0.4)
 		lane_rect.add_child(line)
 
-	for col in range(GRID_COLS + 1):
+	for col in range(CombatConstants.GRID_COLS + 1):
 		var line = ColorRect.new()
-		line.position = Vector2(col * CELL_SIZE, 0)
+		line.position = Vector2(col * CombatConstants.CELL_SIZE, 0)
 		line.size = Vector2(1, lane_height)
 		line.color = Color(0.3, 0.5, 1.0, 0.4)
 		lane_rect.add_child(line)
 
 	# Add column numbers at the top of the lane
-	for col in range(GRID_COLS):
+	for col in range(CombatConstants.GRID_COLS):
 		var col_label = Label.new()
 		col_label.text = str(col)
-		col_label.position = Vector2(col * CELL_SIZE + CELL_SIZE / 2 - 8, -25)
+		col_label.position = Vector2(col * CombatConstants.CELL_SIZE + CombatConstants.CELL_SIZE / 2 - 8, -25)
 		col_label.add_theme_font_size_override("font_size", 16)
 		col_label.add_theme_color_override("font_color", Color(0.8, 0.9, 1.0, 0.9))
 		lane_rect.add_child(col_label)
@@ -361,7 +313,7 @@ func get_random_empty_cell(lane_index: int, columns: Array) -> Vector2i:
 	var empty_cells = []
 
 	for col in columns:
-		for row in range(GRID_ROWS):
+		for row in range(CombatConstants.GRID_ROWS):
 			if lane_grids[lane_index][row][col] == null:
 				empty_cells.append(Vector2i(row, col))
 
@@ -373,22 +325,22 @@ func get_random_empty_cell(lane_index: int, columns: Array) -> Vector2i:
 func get_cell_world_position(lane_index: int, row: int, col: int) -> Vector2:
 	# Returns the center world position of a grid cell
 	var lane_y = lanes[lane_index]["y_position"]
-	var lane_height = GRID_ROWS * CELL_SIZE
+	var lane_height = CombatConstants.GRID_ROWS * CombatConstants.CELL_SIZE
 
 	# Calculate cell center position
-	var x = GRID_START_X + (col * CELL_SIZE) + (CELL_SIZE / 2)
-	var y = (lane_y - lane_height / 2) + (row * CELL_SIZE) + (CELL_SIZE / 2)
+	var x = CombatConstants.GRID_START_X + (col * CombatConstants.CELL_SIZE) + (CombatConstants.CELL_SIZE / 2)
+	var y = (lane_y - lane_height / 2) + (row * CombatConstants.CELL_SIZE) + (CombatConstants.CELL_SIZE / 2)
 
 	return Vector2(x, y)
 
 func occupy_grid_cell(lane_index: int, row: int, col: int, unit: Dictionary):
 	# Mark a grid cell as occupied by a unit
-	if row >= 0 and row < GRID_ROWS and col >= 0 and col < GRID_COLS:
+	if row >= 0 and row < CombatConstants.GRID_ROWS and col >= 0 and col < CombatConstants.GRID_COLS:
 		lane_grids[lane_index][row][col] = unit
 
 func free_grid_cell(lane_index: int, row: int, col: int):
 	# Mark a grid cell as empty
-	if row >= 0 and row < GRID_ROWS and col >= 0 and col < GRID_COLS:
+	if row >= 0 and row < CombatConstants.GRID_ROWS and col >= 0 and col < CombatConstants.GRID_COLS:
 		lane_grids[lane_index][row][col] = null
 
 func get_valid_move_cells(unit: Dictionary) -> Array[Vector2i]:
@@ -405,8 +357,8 @@ func get_valid_move_cells(unit: Dictionary) -> Array[Vector2i]:
 	var movement_speed = unit.get("movement_speed", 0)
 
 	# Check all cells within Manhattan distance of movement_speed
-	for row in range(GRID_ROWS):
-		for col in range(GRID_COLS):
+	for row in range(CombatConstants.GRID_ROWS):
+		for col in range(CombatConstants.GRID_COLS):
 			# Skip current position
 			if row == current_row and col == current_col:
 				continue
@@ -435,8 +387,8 @@ func show_movement_overlay(unit: Dictionary):
 	valid_move_cells = get_valid_move_cells(unit)
 
 	# Create overlays for all cells in the lane
-	for row in range(GRID_ROWS):
-		for col in range(GRID_COLS):
+	for row in range(CombatConstants.GRID_ROWS):
+		for col in range(CombatConstants.GRID_COLS):
 			var cell_pos = Vector2i(row, col)
 			var is_valid = false
 
@@ -455,8 +407,8 @@ func show_movement_overlay(unit: Dictionary):
 			var world_pos = get_cell_world_position(lane_index, row, col)
 
 			# Position at cell center, adjust for cell size
-			overlay.position = Vector2(world_pos.x - CELL_SIZE / 2, world_pos.y - CELL_SIZE / 2)
-			overlay.size = Vector2(CELL_SIZE, CELL_SIZE)
+			overlay.position = Vector2(world_pos.x - CombatConstants.CELL_SIZE / 2, world_pos.y - CombatConstants.CELL_SIZE / 2)
+			overlay.size = Vector2(CombatConstants.CELL_SIZE, CombatConstants.CELL_SIZE)
 
 			# Set color based on validity
 			if is_valid:
@@ -556,17 +508,17 @@ func end_ship_drag(mouse_pos: Vector2):
 func get_cell_at_position(pos: Vector2, lane_index: int) -> Vector2i:
 	# Convert world position to grid cell coordinates
 	var lane_y = lanes[lane_index]["y_position"]
-	var lane_height = GRID_ROWS * CELL_SIZE
+	var lane_height = CombatConstants.GRID_ROWS * CombatConstants.CELL_SIZE
 
 	# Calculate which row and column
-	var relative_x = pos.x - GRID_START_X
+	var relative_x = pos.x - CombatConstants.GRID_START_X
 	var relative_y = pos.y - (lane_y - lane_height / 2)
 
-	var col = int(relative_x / CELL_SIZE)
-	var row = int(relative_y / CELL_SIZE)
+	var col = int(relative_x / CombatConstants.CELL_SIZE)
+	var row = int(relative_y / CombatConstants.CELL_SIZE)
 
 	# Check if within bounds
-	if row >= 0 and row < GRID_ROWS and col >= 0 and col < GRID_COLS:
+	if row >= 0 and row < CombatConstants.GRID_ROWS and col >= 0 and col < CombatConstants.GRID_COLS:
 		return Vector2i(row, col)
 
 	return Vector2i(-1, -1)
@@ -638,13 +590,13 @@ func setup_mothership():
 	# Create mothership sprite on the left side
 	var mothership_container = Control.new()
 	mothership_container.name = "Mothership"
-	mothership_container.position = Vector2(MOTHERSHIP_X, get_viewport_rect().size.y / 2 - 100)
+	mothership_container.position = Vector2(CombatConstants.MOTHERSHIP_X, get_viewport_rect().size.y / 2 - 100)
 	add_child(mothership_container)
 
 	# Add sprite
 	var sprite = TextureRect.new()
 	sprite.name = "Sprite"
-	sprite.texture = MothershipTexture
+	sprite.texture = CombatConstants.MothershipTexture
 	sprite.custom_minimum_size = Vector2(150, 150)
 	sprite.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
 	sprite.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
@@ -659,7 +611,7 @@ func setup_mothership():
 	label.add_theme_color_override("font_color", Color(0.3, 0.8, 1, 1))
 	mothership_container.add_child(label)
 
-	print("Mothership created at x=", MOTHERSHIP_X)
+	print("Mothership created at x=", CombatConstants.MOTHERSHIP_X)
 
 func setup_turrets():
 	# Create 5 turrets in specific positions
@@ -670,7 +622,7 @@ func setup_turrets():
 	var turret_positions = [
 		{
 			"name": "Turret 1",
-			"x": MOTHERSHIP_X + TURRET_X_OFFSET,
+			"x": CombatConstants.MOTHERSHIP_X + CombatConstants.TURRET_X_OFFSET,
 			"y": (lanes[0]["y_position"] + lanes[1]["y_position"]) / 2,  # Between lane 1 and 2
 			"enabled": true,
 			"turret_type": "lightning_turret",
@@ -678,7 +630,7 @@ func setup_turrets():
 		},
 		{
 			"name": "Turret 2",
-			"x": MOTHERSHIP_X + TURRET_X_OFFSET,
+			"x": CombatConstants.MOTHERSHIP_X + CombatConstants.TURRET_X_OFFSET,
 			"y": (lanes[1]["y_position"] + lanes[2]["y_position"]) / 2,  # Between lane 2 and 3
 			"enabled": true,
 			"turret_type": "cannon_turret",
@@ -686,7 +638,7 @@ func setup_turrets():
 		},
 		{
 			"name": "Turret 3",
-			"x": MOTHERSHIP_X + SECONDARY_TURRET_X_OFFSET,
+			"x": CombatConstants.MOTHERSHIP_X + CombatConstants.SECONDARY_TURRET_X_OFFSET,
 			"y": lanes[0]["y_position"],  # Lane 1
 			"enabled": false,
 			"turret_type": "lightning_turret",
@@ -694,7 +646,7 @@ func setup_turrets():
 		},
 		{
 			"name": "Turret 4",
-			"x": MOTHERSHIP_X + SECONDARY_TURRET_X_OFFSET,
+			"x": CombatConstants.MOTHERSHIP_X + CombatConstants.SECONDARY_TURRET_X_OFFSET,
 			"y": lanes[1]["y_position"],  # Lane 2
 			"enabled": false,
 			"turret_type": "cannon_turret",
@@ -702,7 +654,7 @@ func setup_turrets():
 		},
 		{
 			"name": "Turret 5",
-			"x": MOTHERSHIP_X + SECONDARY_TURRET_X_OFFSET,
+			"x": CombatConstants.MOTHERSHIP_X + CombatConstants.SECONDARY_TURRET_X_OFFSET,
 			"y": lanes[2]["y_position"],  # Lane 3
 			"enabled": false,
 			"turret_type": "lightning_turret",
@@ -738,10 +690,10 @@ func create_turret(turret_name: String, turret_type: String, x_pos: float, y_pos
 		var sprite = TextureRect.new()
 		sprite.name = "Sprite"
 		sprite.texture = turret_texture
-		sprite.custom_minimum_size = Vector2(TURRET_SIZE, TURRET_SIZE)
+		sprite.custom_minimum_size = Vector2(CombatConstants.TURRET_SIZE, CombatConstants.TURRET_SIZE)
 		sprite.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
 		sprite.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		sprite.position = Vector2(-TURRET_SIZE / 2, -TURRET_SIZE / 2)  # Center the sprite
+		sprite.position = Vector2(-CombatConstants.TURRET_SIZE / 2, -CombatConstants.TURRET_SIZE / 2)  # Center the sprite
 		turret_container.add_child(sprite)
 
 		# Create turret data dictionary
@@ -751,7 +703,7 @@ func create_turret(turret_name: String, turret_type: String, x_pos: float, y_pos
 			"display_name": db_turret_data["display_name"],
 			"container": turret_container,
 			"sprite": sprite,
-			"size": TURRET_SIZE,  # Add size field for combat calculations
+			"size": CombatConstants.TURRET_SIZE,  # Add size field for combat calculations
 			"position": Vector2(x_pos, y_pos),
 			"enabled": true,
 			"target_lanes": target_lanes,  # Which lanes this turret can attack
@@ -777,7 +729,7 @@ func create_turret(turret_name: String, turret_type: String, x_pos: float, y_pos
 		turrets.append(turret_data)
 
 		# Create health bar
-		create_health_bar(turret_container, TURRET_SIZE, turret_data["current_shield"], turret_data["current_armor"])
+		create_health_bar(turret_container, CombatConstants.TURRET_SIZE, turret_data["current_shield"], turret_data["current_armor"])
 
 		# Initialize energy bar
 		update_energy_bar(turret_data)
@@ -815,7 +767,7 @@ func setup_enemy_spawner():
 	# Create enemy spawner placeholder on the right side
 	var spawner_container = Control.new()
 	spawner_container.name = "EnemySpawner"
-	spawner_container.position = Vector2(ENEMY_SPAWN_X, get_viewport_rect().size.y / 2 - 100)
+	spawner_container.position = Vector2(CombatConstants.ENEMY_SPAWN_X, get_viewport_rect().size.y / 2 - 100)
 	add_child(spawner_container)
 
 	# Add visual indicator (placeholder box)
@@ -835,7 +787,7 @@ func setup_enemy_spawner():
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	spawner_container.add_child(label)
 
-	print("Enemy spawner created at x=", ENEMY_SPAWN_X)
+	print("Enemy spawner created at x=", CombatConstants.ENEMY_SPAWN_X)
 
 func setup_resource_ui():
 	# Create resource UI display
@@ -852,7 +804,7 @@ func setup_enemy_deployment_ui():
 	deploy_enemy_button = Button.new()
 	deploy_enemy_button.name = "DeployEnemyButton"
 	deploy_enemy_button.text = "DEPLOY ENEMY"
-	deploy_enemy_button.position = Vector2(920, 80)  # Below player deploy button
+	deploy_enemy_button.position = Vector2(0, 550)  # Below player deploy button
 	deploy_enemy_button.size = Vector2(200, 50)
 	deploy_enemy_button.add_theme_font_size_override("font_size", 18)
 	deploy_enemy_button.pressed.connect(_on_deploy_enemy_button_pressed)
@@ -952,7 +904,7 @@ func setup_deployment_ui():
 	deploy_button = Button.new()
 	deploy_button.name = "DeployButton"
 	deploy_button.text = "DEPLOY SHIP"
-	deploy_button.position = Vector2(920, 20)
+	deploy_button.position = Vector2(0, 500)
 	deploy_button.size = Vector2(200, 50)
 	deploy_button.add_theme_font_size_override("font_size", 18)
 	deploy_button.pressed.connect(_on_deploy_button_pressed)
@@ -1104,7 +1056,7 @@ func _input(event):
 
 func get_lane_at_position(pos: Vector2) -> int:
 	# Determine which lane a position is in
-	for i in range(NUM_LANES):
+	for i in range(CombatConstants.NUM_LANES):
 		var lane_y = lanes[i]["y_position"]
 		# Check if mouse is within 75 pixels above or below lane center
 		if abs(pos.y - lane_y) < 75:
@@ -1229,7 +1181,7 @@ func deploy_ship_to_lane(ship_type: String, lane_index: int):
 	var deploy_duration: float = db_ship_data.get("deploy_speed", 3.0)  # Default 3.0s if not specified
 
 	# Find random empty cell in player deployment zone (columns 0-3)
-	var cell = get_random_empty_cell(lane_index, PLAYER_DEPLOY_COLS)
+	var cell = get_random_empty_cell(lane_index, CombatConstants.PLAYER_DEPLOY_COLS)
 	if cell == Vector2i(-1, -1):
 		print("ERROR: No empty cells available in lane ", lane_index)
 		return
@@ -1251,7 +1203,7 @@ func deploy_ship_to_lane(ship_type: String, lane_index: int):
 		# Center on mothership sprite
 		start_pos = Vector2(mothership.position.x + 75, mothership_center_y - (ship_size / 2))
 	else:
-		start_pos = Vector2(MOTHERSHIP_X + 75, mothership_center_y - (ship_size / 2))
+		start_pos = Vector2(CombatConstants.MOTHERSHIP_X + 75, mothership_center_y - (ship_size / 2))
 
 	ship_container.position = start_pos
 	add_child(ship_container)
@@ -1364,7 +1316,7 @@ func deploy_enemy_to_lane(enemy_type: String, lane_index: int):
 	var enemy_size: int = db_enemy_data["size"]
 
 	# Find random empty cell in enemy deployment zone (columns 6-9)
-	var cell = get_random_empty_cell(lane_index, ENEMY_DEPLOY_COLS)
+	var cell = get_random_empty_cell(lane_index, CombatConstants.ENEMY_DEPLOY_COLS)
 	if cell == Vector2i(-1, -1):
 		print("ERROR: No empty cells available in lane ", lane_index, " for enemy deployment")
 		return
@@ -1447,7 +1399,7 @@ func start_ship_idle_behavior(ship_data: Dictionary):
 
 	# Calculate angle to enemy spawner
 	var ship_pos = ship_data["original_position"]
-	var enemy_pos = Vector2(ENEMY_SPAWN_X, ship_pos.y)  # Enemy at same lane height
+	var enemy_pos = Vector2(CombatConstants.ENEMY_SPAWN_X, ship_pos.y)  # Enemy at same lane height
 	var direction_to_enemy = enemy_pos - ship_pos
 	var target_rotation = direction_to_enemy.angle()  # No offset needed
 
@@ -1458,7 +1410,7 @@ func start_ship_idle_behavior(ship_data: Dictionary):
 	rotate_tween.tween_property(sprite, "rotation", target_rotation, 1.5)
 
 	# Start idle cycle after delay
-	await get_tree().create_timer(DRIFT_DELAY).timeout
+	await get_tree().create_timer(CombatConstants.DRIFT_DELAY).timeout
 
 	# Check if ship still exists
 	if not is_instance_valid(ship_container):
@@ -1501,19 +1453,19 @@ func idle_cycle(ship_data: Dictionary):
 
 		# Wait before next cycle
 		ship_data["idle_state"] = "waiting"
-		await get_tree().create_timer(DRIFT_DELAY).timeout
+		await get_tree().create_timer(CombatConstants.DRIFT_DELAY).timeout
 
 func drift_backward(ship_data: Dictionary) -> void:
 	var ship_container = ship_data["container"]
 	var original_pos = ship_data["original_position"]
 
 	# Drift slowly toward mothership
-	var drift_target = Vector2(original_pos.x - DRIFT_DISTANCE, original_pos.y)
+	var drift_target = Vector2(original_pos.x - CombatConstants.DRIFT_DISTANCE, original_pos.y)
 
 	var drift_tween = create_tween()
 	drift_tween.set_trans(Tween.TRANS_SINE)
 	drift_tween.set_ease(Tween.EASE_IN_OUT)
-	drift_tween.tween_property(ship_container, "position", drift_target, DRIFT_DURATION)
+	drift_tween.tween_property(ship_container, "position", drift_target, CombatConstants.DRIFT_DURATION)
 
 	await drift_tween.finished
 
@@ -1526,7 +1478,7 @@ func return_to_position(ship_data: Dictionary) -> void:
 	var return_tween = create_tween()
 	return_tween.set_trans(Tween.TRANS_CUBIC)
 	return_tween.set_ease(Tween.EASE_IN_OUT)
-	return_tween.tween_property(ship_container, "position", original_pos, RETURN_DURATION)
+	return_tween.tween_property(ship_container, "position", original_pos, CombatConstants.RETURN_DURATION)
 
 	# Slight rotation adjustment (subtle wobble)
 	var current_rotation = sprite.rotation
@@ -1534,8 +1486,8 @@ func return_to_position(ship_data: Dictionary) -> void:
 	var sprite_tween = create_tween()
 	sprite_tween.set_trans(Tween.TRANS_SINE)
 	sprite_tween.set_ease(Tween.EASE_IN_OUT)
-	sprite_tween.tween_property(sprite, "rotation", wobble_rotation, RETURN_DURATION * 0.3)
-	sprite_tween.tween_property(sprite, "rotation", current_rotation, RETURN_DURATION * 0.7)
+	sprite_tween.tween_property(sprite, "rotation", wobble_rotation, CombatConstants.RETURN_DURATION * 0.3)
+	sprite_tween.tween_property(sprite, "rotation", current_rotation, CombatConstants.RETURN_DURATION * 0.7)
 
 	await return_tween.finished
 
@@ -1543,7 +1495,7 @@ func setup_return_button():
 	# Create close button to return to tactical view (initially hidden)
 	return_button = TextureButton.new()
 	return_button.name = "ReturnButton"
-	return_button.texture_normal = CloseButtonTexture
+	return_button.texture_normal = CombatConstants.CloseButtonTexture
 	return_button.position = Vector2(1110, 10)
 	return_button.custom_minimum_size = Vector2(30, 30)
 	return_button.ignore_texture_size = true
@@ -1559,7 +1511,7 @@ func setup_auto_combat_button():
 	auto_combat_button = Button.new()
 	auto_combat_button.name = "AutoCombatButton"
 	auto_combat_button.text = "START AUTO-COMBAT"
-	auto_combat_button.position = Vector2(450, 20)
+	auto_combat_button.position = Vector2(0, 400)
 	auto_combat_button.size = Vector2(250, 50)
 	auto_combat_button.add_theme_font_size_override("font_size", 18)
 	auto_combat_button.pressed.connect(_on_auto_combat_toggled)
@@ -1570,11 +1522,157 @@ func setup_auto_deploy_button():
 	auto_deploy_button = Button.new()
 	auto_deploy_button.name = "AutoDeployButton"
 	auto_deploy_button.text = "AUTO-DEPLOY"
-	auto_deploy_button.position = Vector2(450, 80)  # Below auto-combat button
+	auto_deploy_button.position = Vector2(0, 450)  # Below auto-combat button
 	auto_deploy_button.size = Vector2(250, 50)
 	auto_deploy_button.add_theme_font_size_override("font_size", 18)
 	auto_deploy_button.pressed.connect(_on_auto_deploy_pressed)
 	add_child(auto_deploy_button)
+
+func setup_debug_ui():
+	# Create debug button (bottom-left corner, always visible)
+	debug_button = Button.new()
+	debug_button.name = "DebugButton"
+	debug_button.text = "Debug"
+	debug_button.position = Vector2(10, 600)  # Bottom-left
+	debug_button.custom_minimum_size = Vector2(80, 40)
+	debug_button.add_theme_font_size_override("font_size", 14)
+	debug_button.pressed.connect(_on_debug_button_pressed)
+	ui_layer.add_child(debug_button)
+
+	# Create debug panel (initially hidden)
+	debug_panel = Panel.new()
+	debug_panel.name = "DebugPanel"
+	debug_panel.position = Vector2(100, 200)
+	debug_panel.custom_minimum_size = Vector2(400, 300)
+	debug_panel.visible = false
+	ui_layer.add_child(debug_panel)
+
+	# Add title
+	var title = Label.new()
+	title.text = "Debug Controls"
+	title.position = Vector2(10, 10)
+	title.add_theme_font_size_override("font_size", 20)
+	debug_panel.add_child(title)
+
+	# Player targeting label
+	var player_label = Label.new()
+	player_label.text = "Player Targeting:"
+	player_label.position = Vector2(10, 60)
+	player_label.add_theme_font_size_override("font_size", 16)
+	debug_panel.add_child(player_label)
+
+	# Player targeting buttons
+	var player_random_btn = Button.new()
+	player_random_btn.text = "Random"
+	player_random_btn.position = Vector2(180, 55)
+	player_random_btn.custom_minimum_size = Vector2(90, 35)
+	player_random_btn.pressed.connect(func(): set_player_targeting("random"))
+	debug_panel.add_child(player_random_btn)
+
+	var player_alpha_btn = Button.new()
+	player_alpha_btn.text = "Alpha"
+	player_alpha_btn.position = Vector2(280, 55)
+	player_alpha_btn.custom_minimum_size = Vector2(90, 35)
+	player_alpha_btn.toggle_mode = true
+	player_alpha_btn.button_pressed = true  # Alpha is default
+	player_alpha_btn.pressed.connect(func(): set_player_targeting("alpha"))
+	debug_panel.add_child(player_alpha_btn)
+
+	# Enemy targeting label
+	var enemy_label = Label.new()
+	enemy_label.text = "Enemy Targeting:"
+	enemy_label.position = Vector2(10, 120)
+	enemy_label.add_theme_font_size_override("font_size", 16)
+	debug_panel.add_child(enemy_label)
+
+	# Enemy targeting buttons
+	var enemy_random_btn = Button.new()
+	enemy_random_btn.text = "Random"
+	enemy_random_btn.position = Vector2(180, 115)
+	enemy_random_btn.custom_minimum_size = Vector2(90, 35)
+	enemy_random_btn.pressed.connect(func(): set_enemy_targeting("random"))
+	debug_panel.add_child(enemy_random_btn)
+
+	var enemy_alpha_btn = Button.new()
+	enemy_alpha_btn.text = "Alpha"
+	enemy_alpha_btn.position = Vector2(280, 115)
+	enemy_alpha_btn.custom_minimum_size = Vector2(90, 35)
+	enemy_alpha_btn.toggle_mode = true
+	enemy_alpha_btn.button_pressed = true  # Alpha is default
+	enemy_alpha_btn.pressed.connect(func(): set_enemy_targeting("alpha"))
+	debug_panel.add_child(enemy_alpha_btn)
+
+	# Current status label
+	var status_label = Label.new()
+	status_label.name = "StatusLabel"
+	status_label.text = "Player: Alpha | Enemy: Alpha"
+	status_label.position = Vector2(10, 180)
+	status_label.add_theme_font_size_override("font_size", 14)
+	status_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+	debug_panel.add_child(status_label)
+
+	# Close button
+	var close_btn = Button.new()
+	close_btn.text = "Close"
+	close_btn.position = Vector2(300, 250)
+	close_btn.custom_minimum_size = Vector2(80, 35)
+	close_btn.pressed.connect(_on_debug_close_pressed)
+	debug_panel.add_child(close_btn)
+
+	print("Debug UI initialized")
+
+func _on_debug_button_pressed():
+	# Toggle debug panel visibility
+	if debug_panel:
+		debug_panel.visible = !debug_panel.visible
+
+func _on_debug_close_pressed():
+	# Hide debug panel
+	if debug_panel:
+		debug_panel.visible = false
+
+func set_player_targeting(mode: String):
+	# Set player targeting mode and reassign all player unit targets
+	player_targeting_mode = mode
+	print("Player targeting mode changed to: ", mode)
+
+	# Update status label
+	update_debug_status_label()
+
+	# Reassign all player targets
+	reassign_all_targets()
+
+func set_enemy_targeting(mode: String):
+	# Set enemy targeting mode and reassign all enemy unit targets
+	enemy_targeting_mode = mode
+	print("Enemy targeting mode changed to: ", mode)
+
+	# Update status label
+	update_debug_status_label()
+
+	# Reassign all enemy targets
+	reassign_all_targets()
+
+func update_debug_status_label():
+	# Update the status label in debug panel
+	if debug_panel:
+		var status_label = debug_panel.get_node_or_null("StatusLabel")
+		if status_label:
+			status_label.text = "Player: " + player_targeting_mode.capitalize() + " | Enemy: " + enemy_targeting_mode.capitalize()
+
+func reassign_all_targets():
+	# Reassign targets for all active units using their current targeting mode
+	print("Reassigning all unit targets...")
+
+	for lane in lanes:
+		for unit in lane["units"]:
+			# Clear existing target
+			unit.erase("auto_target")
+
+			# Assign new target based on current mode
+			assign_random_target(unit)
+
+	print("Target reassignment complete")
 
 func setup_zoom_timer_label():
 	# Create zoom timer countdown label
@@ -1694,7 +1792,7 @@ func _on_return_to_tactical():
 		stop_lane_combat(prev_lane_index)
 
 	# Resume idle animations for ALL lanes when returning to tactical view
-	for i in range(NUM_LANES):
+	for i in range(CombatConstants.NUM_LANES):
 		resume_lane_idle_animations(i)
 
 	is_zoomed = false
@@ -1896,19 +1994,19 @@ func fire_single_laser():
 
 	# Create laser sprite (small projectile)
 	var laser = Sprite2D.new()
-	laser.texture = LaserTexture
+	laser.texture = CombatConstants.LaserTexture
 	laser.position = start_pos
 	laser.rotation = angle
 	laser.z_index = 1  # Above ships
 	add_child(laser)
 
 	# Scale laser to be 6 pixels tall
-	var laser_height = LaserTexture.get_height()
+	var laser_height = CombatConstants.LaserTexture.get_height()
 	var scale_y = 6.0 / laser_height
 	laser.scale = Vector2(scale_y, scale_y)  # Uniform scale to maintain aspect ratio
 
 	# Center the sprite
-	laser.offset = Vector2(-LaserTexture.get_width() / 2, -LaserTexture.get_height() / 2)
+	laser.offset = Vector2(-CombatConstants.LaserTexture.get_width() / 2, -CombatConstants.LaserTexture.get_height() / 2)
 
 	# Animate laser: fly quickly to target (0.2 seconds)
 	var flight_duration = 0.2
@@ -2584,11 +2682,237 @@ func stop_auto_combat():
 			if unit.has("sprite"):
 				unit["sprite"].modulate = Color(1, 1, 1)
 
+# ============================================================================
+# TARGETING HELPER FUNCTIONS (for targeting_function_alpha)
+# ============================================================================
+
+func find_closest_in_row(unit: Dictionary, unit_lane: int, unit_row: int, is_enemy: bool) -> Dictionary:
+	# Find the closest enemy in the same lane and same grid row
+	# Returns closest enemy by grid column distance, or empty Dictionary if none found
+
+	if unit_lane < 0 or unit_row < 0:
+		return {}
+
+	var unit_col = unit.get("grid_col", -1)
+	if unit_col < 0:
+		return {}
+
+	var lane = lanes[unit_lane]
+	var closest_target = {}
+	var closest_distance = 999999
+
+	for other_unit in lane["units"]:
+		# Skip if same faction
+		var other_is_enemy = other_unit.get("is_enemy", false)
+		if is_enemy == other_is_enemy:
+			continue
+
+		# Check if in same row
+		var other_row = other_unit.get("grid_row", -1)
+		if other_row != unit_row:
+			continue
+
+		# Calculate column distance
+		var other_col = other_unit.get("grid_col", -1)
+		if other_col < 0:
+			continue
+
+		var distance = abs(unit_col - other_col)
+		if distance < closest_distance:
+			closest_distance = distance
+			closest_target = other_unit
+
+	return closest_target
+
+func find_targetable_turret(unit: Dictionary, unit_lane: int, is_enemy: bool) -> Dictionary:
+	# Find a turret that the unit can target
+	# Player units don't target turrets (turrets are player-only)
+	# Enemy units target player turrets that can attack their lane
+
+	if not is_enemy:
+		# Player units don't target turrets
+		return {}
+
+	# Enemy units target player turrets
+	for turret in turrets:
+		if not turret.get("enabled", false):
+			continue
+
+		# Check if this turret can attack the unit's lane
+		if unit_lane in turret.get("target_lanes", []):
+			return turret
+
+	return {}
+
+func find_closest_in_adjacent_rows(unit: Dictionary, unit_lane: int, unit_row: int, is_enemy: bool) -> Dictionary:
+	# Find the closest enemy in adjacent rows (row ± 1) within the same lane
+	# Returns closest enemy across both adjacent rows
+
+	if unit_lane < 0 or unit_row < 0:
+		return {}
+
+	var unit_col = unit.get("grid_col", -1)
+	if unit_col < 0:
+		return {}
+
+	var lane = lanes[unit_lane]
+	var closest_target = {}
+	var closest_distance = 999999
+
+	# Check row above (row - 1)
+	var adjacent_rows = []
+	if unit_row > 0:
+		adjacent_rows.append(unit_row - 1)
+	if unit_row < CombatConstants.GRID_ROWS - 1:
+		adjacent_rows.append(unit_row + 1)
+
+	for other_unit in lane["units"]:
+		# Skip if same faction
+		var other_is_enemy = other_unit.get("is_enemy", false)
+		if is_enemy == other_is_enemy:
+			continue
+
+		# Check if in adjacent row
+		var other_row = other_unit.get("grid_row", -1)
+		if other_row not in adjacent_rows:
+			continue
+
+		# Calculate column distance
+		var other_col = other_unit.get("grid_col", -1)
+		if other_col < 0:
+			continue
+
+		var distance = abs(unit_col - other_col)
+		if distance < closest_distance:
+			closest_distance = distance
+			closest_target = other_unit
+
+	return closest_target
+
+func find_any_in_lane(unit: Dictionary, unit_lane: int, is_enemy: bool) -> Dictionary:
+	# Find any enemy in the unit's lane (fallback option)
+	# Returns closest by column distance
+
+	if unit_lane < 0:
+		return {}
+
+	var unit_col = unit.get("grid_col", -1)
+	if unit_col < 0:
+		return {}
+
+	var lane = lanes[unit_lane]
+	var closest_target = {}
+	var closest_distance = 999999
+
+	for other_unit in lane["units"]:
+		# Skip if same faction
+		var other_is_enemy = other_unit.get("is_enemy", false)
+		if is_enemy == other_is_enemy:
+			continue
+
+		# Calculate column distance
+		var other_col = other_unit.get("grid_col", -1)
+		if other_col < 0:
+			continue
+
+		var distance = abs(unit_col - other_col)
+		if distance < closest_distance:
+			closest_distance = distance
+			closest_target = other_unit
+
+	return closest_target
+
+# ============================================================================
+# MAIN TARGETING FUNCTION (Row-Based Priority Targeting)
+# ============================================================================
+
+func targeting_function_alpha(unit: Dictionary) -> Dictionary:
+	# Strategic row-based targeting with priority system:
+	# 1. Closest enemy in same row (same lane + grid_row)
+	# 2. Turret or spawner (if enemy unit)
+	# 3. Closest enemy in adjacent rows (row ± 1)
+	# 4. Mothership or boss (not implemented - skip for now)
+	# 5. Any enemy in same lane
+	# 6. No target (return empty)
+
+	if unit.is_empty():
+		return {}
+
+	var unit_lane = unit.get("lane_index", -1)
+	var unit_row = unit.get("grid_row", -1)
+	var is_enemy = unit.get("is_enemy", false)
+
+	# Priority 1: Same row (same lane + same grid_row)
+	var same_row_target = find_closest_in_row(unit, unit_lane, unit_row, is_enemy)
+	if not same_row_target.is_empty():
+		print("  [Alpha] ", unit.get("type"), " → same row: ", same_row_target.get("type"))
+		return same_row_target
+
+	# Priority 2: Turrets/spawners
+	var turret_target = find_targetable_turret(unit, unit_lane, is_enemy)
+	if not turret_target.is_empty():
+		print("  [Alpha] ", unit.get("type"), " → turret: ", turret_target.get("type"))
+		return turret_target
+
+	# Priority 3: Adjacent rows (row ± 1)
+	var adjacent_target = find_closest_in_adjacent_rows(unit, unit_lane, unit_row, is_enemy)
+	if not adjacent_target.is_empty():
+		print("  [Alpha] ", unit.get("type"), " → adjacent row: ", adjacent_target.get("type"))
+		return adjacent_target
+
+	# Priority 4: Mothership or boss (skipped for now - would need targetable structure objects)
+
+	# Priority 5: Any enemy in lane
+	var lane_target = find_any_in_lane(unit, unit_lane, is_enemy)
+	if not lane_target.is_empty():
+		print("  [Alpha] ", unit.get("type"), " → any in lane: ", lane_target.get("type"))
+		return lane_target
+
+	# Priority 6: No target
+	print("  [Alpha] ", unit.get("type"), " → no targets available")
+	return {}
+
+# ============================================================================
+# CURRENT TARGETING FUNCTION (uses targeting_function_alpha)
+# ============================================================================
+
 func assign_random_target(unit: Dictionary, restrict_to_lane: int = -1):
-	# Assign a random enemy target to a unit
-	# If restrict_to_lane >= 0, only target ships in that lane
+	# Assign a target to a unit based on current targeting mode (alpha or random)
+	# Checks is_enemy flag to determine which targeting mode to use
+
 	if unit.is_empty():
 		return
+
+	# Determine which targeting mode to use
+	var is_enemy = unit.get("is_enemy", false)
+	var target_mode = enemy_targeting_mode if is_enemy else player_targeting_mode
+
+	# Get target using selected mode
+	var target = {}
+	if target_mode == "alpha":
+		target = targeting_function_alpha(unit)
+	else:  # "random"
+		target = targeting_function_random(unit, restrict_to_lane)
+
+	if target.is_empty():
+		unit["auto_target"] = null
+		print("No targets available for ", unit.get("type", "unknown"))
+		return
+
+	# Assign target and start attacking
+	unit["auto_target"] = target
+	start_auto_attack(unit, target)
+
+# ============================================================================
+# RANDOM TARGETING FUNCTION (Original priority-based random selection)
+# ============================================================================
+
+func targeting_function_random(unit: Dictionary, restrict_to_lane: int = -1) -> Dictionary:
+	# Random targeting with priority system (original logic)
+	# Returns a random target Dictionary, or empty Dictionary if none found
+
+	if unit.is_empty():
+		return {}
 
 	var is_enemy = unit.get("is_enemy", false)
 
@@ -2652,21 +2976,17 @@ func assign_random_target(unit: Dictionary, restrict_to_lane: int = -1):
 		potential_targets = bilane_turret_targets
 		# print("Targeting bi-lane turrets (priority 3)")
 
-	# If no targets, clear auto_target
+	# If no targets, return empty
 	if potential_targets.is_empty():
-		unit["auto_target"] = null
-		print("No targets available for ", unit.get("type", "unknown"))
-		return
+		print("  [Random] No targets available for ", unit.get("type", "unknown"))
+		return {}
 
 	# Pick random target from the selected priority group
 	var random_index = randi() % potential_targets.size()
 	var target = potential_targets[random_index]
-	unit["auto_target"] = target
 
-	# Start attacking
-	start_auto_attack(unit, target)
-
-	print("Assigned target: ", unit.get("type", "unknown"), " -> ", target.get("type", "unknown"))
+	print("  [Random] ", unit.get("type", "unknown"), " → ", target.get("type", "unknown"))
+	return target
 
 func start_target_switch_timer(unit: Dictionary):
 	# Start a timer that switches targets every 3 seconds
@@ -2816,17 +3136,17 @@ func auto_fire_single_laser(attacker: Dictionary, target: Dictionary):
 
 	# Create laser sprite
 	var laser = Sprite2D.new()
-	laser.texture = LaserTexture
+	laser.texture = CombatConstants.LaserTexture
 	laser.position = start_pos
 	laser.rotation = angle
 	laser.z_index = 1
 	add_child(laser)
 
 	# Scale laser
-	var laser_height = LaserTexture.get_height()
+	var laser_height = CombatConstants.LaserTexture.get_height()
 	var scale_y = 6.0 / laser_height
 	laser.scale = Vector2(scale_y, scale_y)
-	laser.offset = Vector2(-LaserTexture.get_width() / 2, -LaserTexture.get_height() / 2)
+	laser.offset = Vector2(-CombatConstants.LaserTexture.get_width() / 2, -CombatConstants.LaserTexture.get_height() / 2)
 
 	# Animate laser
 	var flight_duration = 0.2
