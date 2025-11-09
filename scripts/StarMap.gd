@@ -962,7 +962,8 @@ func _on_refresh_starmap():
 	generate_starfield()
 
 func _on_to_combat():
-	get_tree().change_scene_to_file("res://scenes/Combat.tscn")
+	# TODO: Replace with new combat scene
+	pass
 
 func _on_deck_builder():
 	get_tree().change_scene_to_file("res://scenes/DeckBuilder.tscn")

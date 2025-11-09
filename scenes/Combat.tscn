@@ -1,6 +1,6 @@
-[gd_scene load_steps=3 format=3 uid="uid://c2k8yv3xswji"]
+[gd_scene load_steps=3 format=3 uid="uid://d2qv0hh0pqkv5"]
 
-[ext_resource type="Script" uid="uid://cra27vfyu4feh" path="res://scripts/Combat.gd" id="1_combat"]
+[ext_resource type="Script" path="res://scripts/Combat.gd" id="1_combat"]
 [ext_resource type="Texture2D" uid="uid://dg7x8c5v2nwji" path="res://assets/sprites/slime.svg" id="2_slime"]
 
 [node name="Combat" type="Node2D"]

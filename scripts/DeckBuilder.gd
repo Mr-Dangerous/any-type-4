@@ -3,8 +3,8 @@ extends Node2D
 # Card database
 var card_database: Dictionary = {}
 
-# Card scene
-var CardScene = preload("res://scenes/Card.tscn")
+# TODO: Card scene will be created when implementing new card system
+# var CardScene = preload("res://scenes/Card.tscn")
 
 # UI references
 @onready var card_grid: GridContainer = $UI/ScrollContainer/CardGrid
@@ -24,8 +24,6 @@ func _ready():
 	# Check if we came from a specific scene
 	if GameData.has_starmap_data:
 		previous_scene = "res://scenes/StarMap.tscn"
-	elif GameData.has_combat_state:
-		previous_scene = "res://scenes/Combat.tscn"
 	else:
 		# Default to starmap
 		previous_scene = "res://scenes/StarMap.tscn"
@@ -102,22 +100,23 @@ func display_deck(deck: Array[Dictionary]):
 	for child in card_grid.get_children():
 		child.queue_free()
 
+	# TODO: Re-implement when new Card scene is created
 	# Create card UI for each card in the deck
-	var card_index = 0
-	for card_data in deck:
-		var card = CardScene.instantiate()
-		card_grid.add_child(card)
-
-		# Use setup method to initialize card
-		card.setup(card_data, "deck_card_%d" % card_index)
-
-		# Scale down slightly for grid view
-		card.scale = Vector2(0.9, 0.9)
-
-		# Disable mouse interaction in deck builder
-		card.mouse_filter = Control.MOUSE_FILTER_IGNORE
-
-		card_index += 1
+	# var card_index = 0
+	# for card_data in deck:
+	# 	var card = CardScene.instantiate()
+	# 	card_grid.add_child(card)
+	#
+	# 	# Use setup method to initialize card
+	# 	card.setup(card_data, "deck_card_%d" % card_index)
+	#
+	# 	# Scale down slightly for grid view
+	# 	card.scale = Vector2(0.9, 0.9)
+	#
+	# 	# Disable mouse interaction in deck builder
+	# 	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	#
+	# 	card_index += 1
 
 func _on_back_button_pressed():
 	# Return to previous scene

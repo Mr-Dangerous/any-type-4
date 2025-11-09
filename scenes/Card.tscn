@@ -1,4 +1,4 @@
-[gd_scene load_steps=2 format=3 uid="uid://b0qh8yv2xrwji"]
+[gd_scene load_steps=2 format=3 uid="uid://cftiflsfwhu7d"]
 
 [ext_resource type="Script" path="res://scripts/Card.gd" id="1_1a1a1"]
 
@@ -8,7 +8,6 @@ layout_mode = 3
 anchors_preset = 0
 offset_right = 120.0
 offset_bottom = 180.0
-mouse_filter = 0
 script = ExtResource("1_1a1a1")
 
 [node name="Panel" type="Panel" parent="."]

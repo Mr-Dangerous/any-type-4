@@ -13,6 +13,10 @@ const ENEMY_SPAWN_X = 1000.0
 const SHIP_DEPLOY_X_START = 280.0  # Where first ship deploys
 const SHIP_SPACING = 40.0  # Horizontal spacing between ships in same lane
 
+# Turret constants
+const TURRET_X_OFFSET = 180.0  # Slightly in front of mothership
+const TURRET_SIZE = 100  # Turrets are larger than regular ships
+
 # Ship size classes (width in pixels)
 const SIZE_TINY = 20  # 32-48 range, using middle value
 const SIZE_SMALL = 24  # 40-56 range, using middle value
@@ -46,6 +50,7 @@ const LaserTexture = preload("res://assets/Effects/laser_light/s_laser_light_001
 
 # Game state
 var lanes: Array[Dictionary] = []  # Each lane can contain units
+var turrets: Array[Dictionary] = []  # Turret battle objects
 var selected_ship_type: String = ""  # Currently selected ship for deployment
 var ship_selection_panel: Panel = null
 var deploy_button: Button = null
@@ -124,6 +129,9 @@ func _ready():
 
 	# Setup mothership
 	setup_mothership()
+
+	# Setup turrets
+	setup_turrets()
 
 	# Setup enemy spawner
 	setup_enemy_spawner()
@@ -322,6 +330,156 @@ func setup_mothership():
 	mothership_container.add_child(label)
 
 	print("Mothership created at x=", MOTHERSHIP_X)
+
+func setup_turrets():
+	# Create 5 turrets in specific positions
+	# Position 1: Between lane 1 and 2
+	# Position 2: Between lane 2 and 3
+	# Position 3, 4, 5: In each lane (disabled)
+
+	var turret_positions = [
+		{
+			"name": "Turret 1",
+			"x": MOTHERSHIP_X + TURRET_X_OFFSET,
+			"y": (lanes[0]["y_position"] + lanes[1]["y_position"]) / 2,  # Between lane 1 and 2
+			"enabled": true,
+			"turret_type": "lightning_turret",
+			"target_lanes": [0, 1]  # Attacks lanes 1 and 2
+		},
+		{
+			"name": "Turret 2",
+			"x": MOTHERSHIP_X + TURRET_X_OFFSET,
+			"y": (lanes[1]["y_position"] + lanes[2]["y_position"]) / 2,  # Between lane 2 and 3
+			"enabled": true,
+			"turret_type": "cannon_turret",
+			"target_lanes": [1, 2]  # Attacks lanes 2 and 3
+		},
+		{
+			"name": "Turret 3",
+			"x": MOTHERSHIP_X + TURRET_X_OFFSET,
+			"y": lanes[0]["y_position"],  # Lane 1
+			"enabled": false,
+			"turret_type": "lightning_turret",
+			"target_lanes": [0]  # Attacks lane 1 only
+		},
+		{
+			"name": "Turret 4",
+			"x": MOTHERSHIP_X + TURRET_X_OFFSET,
+			"y": lanes[1]["y_position"],  # Lane 2
+			"enabled": false,
+			"turret_type": "cannon_turret",
+			"target_lanes": [1]  # Attacks lane 2 only
+		},
+		{
+			"name": "Turret 5",
+			"x": MOTHERSHIP_X + TURRET_X_OFFSET,
+			"y": lanes[2]["y_position"],  # Lane 3
+			"enabled": false,
+			"turret_type": "lightning_turret",
+			"target_lanes": [2]  # Attacks lane 3 only
+		}
+	]
+
+	for i in range(turret_positions.size()):
+		var turret_pos = turret_positions[i]
+		create_turret(turret_pos["name"], turret_pos["turret_type"], turret_pos["x"], turret_pos["y"], turret_pos["enabled"], turret_pos["target_lanes"], i)
+
+	print("Created ", turrets.size(), " turrets")
+
+func create_turret(turret_name: String, turret_type: String, x_pos: float, y_pos: float, is_enabled: bool, target_lanes: Array, turret_index: int):
+	# Get turret data from database
+	var db_turret_data = ShipDatabase.get_ship_data(turret_type)
+	if db_turret_data == null:
+		print("ERROR: Turret type not found in database: ", turret_type)
+		return
+
+	# Create turret container
+	var turret_container = Control.new()
+	turret_container.name = turret_name
+	turret_container.position = Vector2(x_pos, y_pos)
+	turret_container.z_index = 10  # Render turrets above lanes
+	add_child(turret_container)
+
+	# Load turret sprite
+	var turret_texture: Texture2D = load(db_turret_data["sprite_path"])
+
+	if is_enabled:
+		# Create enabled turret sprite
+		var sprite = TextureRect.new()
+		sprite.name = "Sprite"
+		sprite.texture = turret_texture
+		sprite.custom_minimum_size = Vector2(TURRET_SIZE, TURRET_SIZE)
+		sprite.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
+		sprite.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		sprite.position = Vector2(-TURRET_SIZE / 2, -TURRET_SIZE / 2)  # Center the sprite
+		turret_container.add_child(sprite)
+
+		# Create turret data dictionary
+		var turret_data = {
+			"object_type": "turret",  # Mark as turret type
+			"type": turret_type,
+			"display_name": db_turret_data["display_name"],
+			"container": turret_container,
+			"sprite": sprite,
+			"size": TURRET_SIZE,  # Add size field for combat calculations
+			"position": Vector2(x_pos, y_pos),
+			"enabled": true,
+			"target_lanes": target_lanes,  # Which lanes this turret can attack
+			"current_armor": db_turret_data["armor"],
+			"current_shield": db_turret_data["shield"],
+			"stats": {
+				"armor": db_turret_data["armor"],
+				"shield": db_turret_data["shield"],
+				"reinforced_armor": db_turret_data.get("reinforced_armor", 0),
+				"damage": db_turret_data["damage"],
+				"accuracy": db_turret_data["accuracy"],
+				"attack_speed": db_turret_data["attack_speed"],
+				"num_attacks": db_turret_data.get("num_attacks", 1),
+				"evasion": db_turret_data.get("evasion", 0),
+				"starting_energy": db_turret_data.get("starting_energy", 0)
+			},
+			"current_energy": db_turret_data.get("starting_energy", 0),
+			"ability_function": db_turret_data.get("ability_function", ""),
+			"ability_name": db_turret_data.get("abilty", ""),
+			"ability_description": db_turret_data.get("ability_description", "")
+		}
+
+		turrets.append(turret_data)
+
+		# Create health bar
+		create_health_bar(turret_container, TURRET_SIZE, turret_data["current_shield"], turret_data["current_armor"])
+
+		# Initialize energy bar
+		update_energy_bar(turret_data)
+	else:
+		# Create disabled turret indicator (sad emoji)
+		var label = Label.new()
+		label.name = "DisabledLabel"
+		label.text = "😢"  # Sad emoji
+		label.position = Vector2(-20, -20)  # Center the emoji
+		label.add_theme_font_size_override("font_size", 40)
+		turret_container.add_child(label)
+
+		# Add small text below
+		var status_label = Label.new()
+		status_label.name = "StatusLabel"
+		status_label.text = "DISABLED"
+		status_label.position = Vector2(-30, 25)
+		status_label.add_theme_font_size_override("font_size", 10)
+		status_label.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5, 0.8))
+		turret_container.add_child(status_label)
+
+		# Create placeholder turret data (not added to active turrets array)
+		var turret_data = {
+			"object_type": "turret",
+			"type": turret_type,
+			"display_name": db_turret_data["display_name"],
+			"container": turret_container,
+			"position": Vector2(x_pos, y_pos),
+			"enabled": false
+		}
+		# Note: We don't add disabled turrets to the turrets array
+		# They're just visual placeholders
 
 func setup_enemy_spawner():
 	# Create enemy spawner placeholder on the right side
@@ -808,6 +966,7 @@ func deploy_ship_to_lane(ship_type: String, lane_index: int):
 
 	# Store original position for idle behavior
 	var ship_data = {
+		"object_type": "ship",  # Distinguish from turrets
 		"type": ship_type,
 		"container": ship_container,
 		"sprite": sprite,
@@ -899,6 +1058,7 @@ func deploy_enemy_to_lane(enemy_type: String, lane_index: int):
 
 	# Create enemy data
 	var enemy_data = {
+		"object_type": "ship",  # Enemies are also ships (not turrets)
 		"type": enemy_type,
 		"container": enemy_container,
 		"sprite": sprite,
@@ -1564,13 +1724,18 @@ func stop_continuous_attack():
 		print("Stopped continuous attack")
 
 func destroy_ship(ship: Dictionary):
-	# Destroy a ship when its health reaches 0
+	# Destroy a ship or turret when its health reaches 0
 	if ship.is_empty():
 		return
 
 	var ship_type = ship.get("type", "unknown")
+	var object_type = ship.get("object_type", "ship")
 	var is_enemy = ship.get("is_enemy", false)
-	print("Destroying ship: ", ship_type, " (enemy: ", is_enemy, ")")
+
+	if object_type == "turret":
+		print("Destroying turret: ", ship_type)
+	else:
+		print("Destroying ship: ", ship_type, " (enemy: ", is_enemy, ")")
 
 	# Clear selections if this ship was selected
 	if selected_attacker == ship:
@@ -1578,32 +1743,52 @@ func destroy_ship(ship: Dictionary):
 	if selected_target == ship:
 		selected_target = {}
 
-	# Stop any attack timer on this ship
+	# Stop any attack timer on this ship/turret
 	if ship.has("container"):
 		var container = ship["container"]
 		var timer = container.get_node_or_null("AttackTimer")
 		if timer:
 			timer.stop()
 			timer.queue_free()
+		var switch_timer = container.get_node_or_null("TargetSwitchTimer")
+		if switch_timer:
+			switch_timer.stop()
+			switch_timer.queue_free()
 
 		# TODO: Play destruction animation/effect here
 		# For now, just remove immediately
 		container.queue_free()
 
-	# Remove ship from its lane
-	for lane in lanes:
-		var index = lane["units"].find(ship)
+	# Remove from appropriate collection
+	if object_type == "turret":
+		# Remove turret from turrets array
+		var index = turrets.find(ship)
 		if index != -1:
-			lane["units"].remove_at(index)
-			print("Ship removed from lane ", lane["index"])
-			break
+			turrets.remove_at(index)
+			print("Turret removed from active turrets")
+	else:
+		# Remove ship from its lane
+		for lane in lanes:
+			var index = lane["units"].find(ship)
+			if index != -1:
+				lane["units"].remove_at(index)
+				print("Ship removed from lane ", lane["index"])
+				break
 
-	# In auto-combat, reassign targets for any ships that were targeting this destroyed ship
-	if auto_combat_active:
+	# In auto-combat or lane combat, reassign targets for any units that were targeting this destroyed object
+	if auto_combat_active or is_zoomed:
+		# Check ships in lanes
 		for lane in lanes:
 			for unit in lane["units"]:
 				if unit.get("auto_target") == ship:
 					assign_random_target(unit)
+
+		# Check turrets
+		for turret in turrets:
+			if turret.get("auto_target") == ship:
+				# Use the turret's active lane if set (during lane combat)
+				var active_lane = turret.get("active_lane", -1)
+				assign_turret_targets(turret, active_lane)
 
 # Auto-combat functions
 
@@ -1768,6 +1953,9 @@ func start_lane_combat(lane_index: int):
 	var lane = lanes[lane_index]
 	print("Starting combat for lane ", lane_index, " with ", lane["units"].size(), " units")
 
+	# Activate turrets that can attack this lane
+	activate_turrets_for_lane(lane_index)
+
 	for unit in lane["units"]:
 		# Assign random target (will be restricted to same lane due to is_zoomed)
 		assign_random_target(unit)
@@ -1781,6 +1969,9 @@ func stop_lane_combat(lane_index: int):
 
 	var lane = lanes[lane_index]
 	print("Stopping combat for lane ", lane_index)
+
+	# Deactivate turrets that were attacking this lane
+	deactivate_turrets_for_lane(lane_index)
 
 	for unit in lane["units"]:
 		# Stop attack timers
@@ -1799,6 +1990,173 @@ func stop_lane_combat(lane_index: int):
 		# Reset sprite modulation
 		if unit.has("sprite"):
 			unit["sprite"].modulate = Color(1, 1, 1)
+
+# Turret combat functions
+
+func activate_turrets_for_lane(lane_index: int):
+	# Activate all turrets that can attack this lane
+	print("Activating turrets for lane ", lane_index)
+
+	for turret in turrets:
+		if not turret["enabled"]:
+			continue
+
+		# Check if this turret targets this lane
+		if lane_index in turret["target_lanes"]:
+			print("  Turret ", turret["display_name"], " engaging lane ", lane_index)
+			# Store the active lane for this turret's current activation
+			turret["active_lane"] = lane_index
+			# Assign targets ONLY from the currently active lane
+			assign_turret_targets(turret, lane_index)
+			# Start attack timer
+			start_turret_attack_timer(turret)
+
+func deactivate_turrets_for_lane(lane_index: int):
+	# Deactivate turrets that were attacking this lane
+	# Note: We need to be careful - some turrets attack multiple lanes
+	# Only stop turrets if ALL their target lanes are inactive
+	print("Deactivating turrets for lane ", lane_index)
+
+	for turret in turrets:
+		if not turret["enabled"]:
+			continue
+
+		# Check if this turret targets this lane
+		if lane_index in turret["target_lanes"]:
+			# Stop this turret (we'll only have one lane active at a time in turn mode)
+			stop_turret_combat(turret)
+
+func assign_turret_targets(turret: Dictionary, active_lane: int = -1):
+	# Assign enemy targets from the turret's target lanes
+	# If active_lane is specified, only target enemies in that specific lane
+	if turret.is_empty() or not turret["enabled"]:
+		return
+
+	var potential_targets: Array[Dictionary] = []
+
+	# If we have an active lane restriction, only use that lane
+	if active_lane >= 0:
+		# Only target the active lane
+		if active_lane < 0 or active_lane >= lanes.size():
+			print("  Invalid active lane for turret ", turret["display_name"])
+			turret.erase("auto_target")
+			return
+
+		# Check if this turret can actually target this lane
+		if active_lane not in turret["target_lanes"]:
+			print("  Turret ", turret["display_name"], " cannot target lane ", active_lane)
+			turret.erase("auto_target")
+			return
+
+		var lane = lanes[active_lane]
+		for unit in lane["units"]:
+			# Turrets attack enemies only
+			if unit.get("is_enemy", false):
+				potential_targets.append(unit)
+	else:
+		# No lane restriction - target all lanes this turret can attack
+		var target_lanes_array = turret["target_lanes"]
+		for lane_idx in target_lanes_array:
+			if lane_idx < 0 or lane_idx >= lanes.size():
+				continue
+
+			var lane = lanes[lane_idx]
+			for unit in lane["units"]:
+				# Turrets attack enemies only
+				if unit.get("is_enemy", false):
+					potential_targets.append(unit)
+
+	if potential_targets.size() == 0:
+		print("  No targets found for turret ", turret["display_name"])
+		turret.erase("auto_target")
+		return
+
+	# Pick a random target
+	var target = potential_targets[randi() % potential_targets.size()]
+	turret["auto_target"] = target
+
+	print("  Turret ", turret["display_name"], " targeting ", target.get("type", "unknown"))
+
+func start_turret_attack_timer(turret: Dictionary):
+	# Start attack timer for turret
+	if not turret.has("container"):
+		return
+
+	var container = turret["container"]
+
+	# Remove existing timer if any
+	var existing_timer = container.get_node_or_null("AttackTimer")
+	if existing_timer:
+		existing_timer.queue_free()
+
+	# Create attack timer
+	var attack_timer = Timer.new()
+	attack_timer.name = "AttackTimer"
+	attack_timer.wait_time = turret["stats"]["attack_speed"]
+	attack_timer.one_shot = false
+	attack_timer.timeout.connect(func(): execute_turret_attack(turret))
+	container.add_child(attack_timer)
+	attack_timer.start()
+
+	# Also start target switching timer (switch targets every 3 seconds)
+	var switch_timer = Timer.new()
+	switch_timer.name = "TargetSwitchTimer"
+	switch_timer.wait_time = 3.0
+	switch_timer.one_shot = false
+	# Use the active lane stored in the turret (if any)
+	switch_timer.timeout.connect(func():
+		var active_lane = turret.get("active_lane", -1)
+		assign_turret_targets(turret, active_lane)
+	)
+	container.add_child(switch_timer)
+	switch_timer.start()
+
+func execute_turret_attack(turret: Dictionary):
+	# Execute a turret attack
+	if not turret.has("auto_target") or turret["auto_target"].is_empty():
+		# No target, try to find one
+		var active_lane = turret.get("active_lane", -1)
+		assign_turret_targets(turret, active_lane)
+		return
+
+	var target = turret["auto_target"]
+
+	# Check if target is still valid (not destroyed)
+	if not target.has("container") or not is_instance_valid(target["container"]):
+		# Target destroyed, find new target
+		var active_lane = turret.get("active_lane", -1)
+		assign_turret_targets(turret, active_lane)
+		return
+
+	# Execute the attack (use auto-combat laser firing system)
+	auto_fire_laser(turret, target)
+
+func stop_turret_combat(turret: Dictionary):
+	# Stop a turret's combat
+	if not turret.has("container"):
+		return
+
+	var container = turret["container"]
+
+	# Stop attack timer
+	var attack_timer = container.get_node_or_null("AttackTimer")
+	if attack_timer:
+		attack_timer.stop()
+		attack_timer.queue_free()
+
+	# Stop switch timer
+	var switch_timer = container.get_node_or_null("TargetSwitchTimer")
+	if switch_timer:
+		switch_timer.stop()
+		switch_timer.queue_free()
+
+	# Clear target and active lane
+	turret.erase("auto_target")
+	turret.erase("active_lane")
+
+	# Reset sprite modulation
+	if turret.has("sprite"):
+		turret["sprite"].modulate = Color(1, 1, 1)
 
 func start_auto_combat():
 	# Start auto-combat: all ships attack random enemies
@@ -1861,6 +2219,21 @@ func assign_random_target(unit: Dictionary, restrict_to_lane: int = -1):
 			var other_is_enemy = other_unit.get("is_enemy", false)
 			if is_enemy != other_is_enemy:  # Opposite factions
 				potential_targets.append(other_unit)
+
+	# If this is an enemy, also consider turrets as targets
+	if is_enemy:
+		for turret in turrets:
+			if not turret["enabled"]:
+				continue
+
+			# Check if turret is in a valid lane for targeting
+			if restrict_to_lane >= 0:
+				# Only target turrets that defend this specific lane
+				if restrict_to_lane in turret["target_lanes"]:
+					potential_targets.append(turret)
+			else:
+				# No lane restriction - all enabled turrets are valid targets
+				potential_targets.append(turret)
 
 	# If no targets, clear auto_target
 	if potential_targets.is_empty():
