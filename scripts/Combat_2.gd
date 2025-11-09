@@ -13,10 +13,18 @@ const ENEMY_SPAWN_X = 1000.0
 const SHIP_DEPLOY_X_START = 280.0  # Where first ship deploys
 const SHIP_SPACING = 40.0  # Horizontal spacing between ships in same lane
 
+# Grid system constants
+const GRID_ROWS = 4  # Height of each lane grid
+const GRID_COLS = 16  # Width of each lane grid
+const CELL_SIZE = 32  # Size of each grid cell in pixels
+const GRID_START_X = 400.0  # Where the grid starts horizontally
+const PLAYER_DEPLOY_COLS = [0, 1, 2, 3]  # Columns 0-3 for player deployment
+const ENEMY_DEPLOY_COLS = [12, 13, 14, 15]  # Columns 12-15 for enemy deployment (last 4 columns)
+
 # Turret constants
 const TURRET_X_OFFSET = 180.0  # Slightly in front of mothership
 const TURRET_SIZE = 100  # Turrets are larger than regular ships
-
+const SECONDARY_TURRET_X_OFFSET = 280
 # Ship size classes (width in pixels)
 const SIZE_TINY = 20  # 32-48 range, using middle value
 const SIZE_SMALL = 24  # 40-56 range, using middle value
@@ -50,6 +58,7 @@ const LaserTexture = preload("res://assets/Effects/laser_light/s_laser_light_001
 
 # Game state
 var lanes: Array[Dictionary] = []  # Each lane can contain units
+var lane_grids: Array = []  # Grid occupancy tracking: [lane_index][row][col] -> unit or null
 var turrets: Array[Dictionary] = []  # Turret battle objects
 var selected_ship_type: String = ""  # Currently selected ship for deployment
 var ship_selection_panel: Panel = null
@@ -67,6 +76,14 @@ var ui_layer: CanvasLayer = null
 # Combat state
 var selected_attacker: Dictionary = {}  # Ship that will attack
 var selected_target: Dictionary = {}  # Ship being targeted
+
+# Ship repositioning state
+var is_dragging_ship: bool = false  # Whether we're currently dragging a ship
+var dragged_ship: Dictionary = {}  # The ship being dragged
+var drag_start_pos: Vector2 = Vector2.ZERO  # Initial mouse position when drag started
+var ghost_ship_container: Control = null  # Ghost ship that follows cursor
+var cell_overlays: Array[ColorRect] = []  # Visual overlays for valid/invalid cells
+var valid_move_cells: Array[Vector2i] = []  # List of valid grid positions for current drag
 
 # Auto-combat state
 var auto_combat_active: bool = false
@@ -272,37 +289,350 @@ func initialize_lanes():
 		}
 		lanes.append(lane)
 
+		# Initialize grid for this lane (4 rows x 10 columns)
+		var grid = []
+		for row in range(GRID_ROWS):
+			var grid_row = []
+			for col in range(GRID_COLS):
+				grid_row.append(null)  # null = empty cell
+			grid.append(grid_row)
+		lane_grids.append(grid)
+
 		# Create visual lane markers
 		create_lane_marker(i, lane["y_position"])
 
 func create_lane_marker(lane_index: int, y_pos: float):
-	# Create a rectangle to visualize the lane
-	var lane_height = 128.0
-	var lane_start_x = MOTHERSHIP_X + 150  # Offset after mothership
-	var lane_width = ENEMY_SPAWN_X - lane_start_x - 50  # Extend to near enemy spawner
+	# Create a rectangle to visualize the lane with grid
+	var lane_width = GRID_COLS * CELL_SIZE
+	var lane_height = GRID_ROWS * CELL_SIZE
 
+	# Position lane so its center aligns with y_pos
 	var lane_rect = ColorRect.new()
 	lane_rect.name = "Lane_%d" % lane_index
-	lane_rect.position = Vector2(lane_start_x, y_pos - lane_height / 2)
+	lane_rect.position = Vector2(GRID_START_X, y_pos - lane_height / 2)
 	lane_rect.size = Vector2(lane_width, lane_height)
-	lane_rect.color = Color(0.2, 0.4, 0.8, 0.35)  # Semi-transparent blue
+	lane_rect.color = Color(0.2, 0.4, 0.8, 0.2)  # Semi-transparent blue
 	add_child(lane_rect)
 
-	# Add border
+	# Add outer border
 	var border = ReferenceRect.new()
 	border.border_color = Color(0.3, 0.5, 1.0, 0.9)
 	border.border_width = 3.0
 	border.size = lane_rect.size
 	lane_rect.add_child(border)
 
+	# Draw grid lines for each cell
+	for row in range(GRID_ROWS + 1):
+		var line = ColorRect.new()
+		line.position = Vector2(0, row * CELL_SIZE)
+		line.size = Vector2(lane_width, 1)
+		line.color = Color(0.3, 0.5, 1.0, 0.4)
+		lane_rect.add_child(line)
+
+	for col in range(GRID_COLS + 1):
+		var line = ColorRect.new()
+		line.position = Vector2(col * CELL_SIZE, 0)
+		line.size = Vector2(1, lane_height)
+		line.color = Color(0.3, 0.5, 1.0, 0.4)
+		lane_rect.add_child(line)
+
+	# Add column numbers at the top of the lane
+	for col in range(GRID_COLS):
+		var col_label = Label.new()
+		col_label.text = str(col)
+		col_label.position = Vector2(col * CELL_SIZE + CELL_SIZE / 2 - 8, -25)
+		col_label.add_theme_font_size_override("font_size", 16)
+		col_label.add_theme_color_override("font_color", Color(0.8, 0.9, 1.0, 0.9))
+		lane_rect.add_child(col_label)
+
 	# Add lane label
 	var label = Label.new()
 	label.name = "LaneLabel_%d" % lane_index
 	label.text = "Lane %d" % (lane_index + 1)
-	label.position = Vector2(10, (lane_height - 24) / 2)  # Center vertically
+	label.position = Vector2(10, 10)
 	label.add_theme_font_size_override("font_size", 18)
 	label.add_theme_color_override("font_color", Color(0.8, 0.9, 1.0, 0.8))
 	lane_rect.add_child(label)
+
+# Grid helper functions
+func get_random_empty_cell(lane_index: int, columns: Array) -> Vector2i:
+	# Returns a random empty cell (row, col) in the specified columns
+	# Returns Vector2i(-1, -1) if no empty cells available
+	var empty_cells = []
+
+	for col in columns:
+		for row in range(GRID_ROWS):
+			if lane_grids[lane_index][row][col] == null:
+				empty_cells.append(Vector2i(row, col))
+
+	if empty_cells.is_empty():
+		return Vector2i(-1, -1)
+
+	return empty_cells[randi() % empty_cells.size()]
+
+func get_cell_world_position(lane_index: int, row: int, col: int) -> Vector2:
+	# Returns the center world position of a grid cell
+	var lane_y = lanes[lane_index]["y_position"]
+	var lane_height = GRID_ROWS * CELL_SIZE
+
+	# Calculate cell center position
+	var x = GRID_START_X + (col * CELL_SIZE) + (CELL_SIZE / 2)
+	var y = (lane_y - lane_height / 2) + (row * CELL_SIZE) + (CELL_SIZE / 2)
+
+	return Vector2(x, y)
+
+func occupy_grid_cell(lane_index: int, row: int, col: int, unit: Dictionary):
+	# Mark a grid cell as occupied by a unit
+	if row >= 0 and row < GRID_ROWS and col >= 0 and col < GRID_COLS:
+		lane_grids[lane_index][row][col] = unit
+
+func free_grid_cell(lane_index: int, row: int, col: int):
+	# Mark a grid cell as empty
+	if row >= 0 and row < GRID_ROWS and col >= 0 and col < GRID_COLS:
+		lane_grids[lane_index][row][col] = null
+
+func get_valid_move_cells(unit: Dictionary) -> Array[Vector2i]:
+	# Calculate all valid cells a unit can move to based on movement_speed
+	# Uses Manhattan distance (no diagonals)
+	var valid_cells: Array[Vector2i] = []
+
+	if not unit.has("grid_row") or not unit.has("grid_col") or not unit.has("lane_index"):
+		return valid_cells
+
+	var current_row = unit["grid_row"]
+	var current_col = unit["grid_col"]
+	var lane_index = unit["lane_index"]
+	var movement_speed = unit.get("movement_speed", 0)
+
+	# Check all cells within Manhattan distance of movement_speed
+	for row in range(GRID_ROWS):
+		for col in range(GRID_COLS):
+			# Skip current position
+			if row == current_row and col == current_col:
+				continue
+
+			# Calculate Manhattan distance (no diagonals)
+			var distance = abs(row - current_row) + abs(col - current_col)
+
+			# Check if within movement range
+			if distance <= movement_speed:
+				# Check if cell is unoccupied
+				if lane_grids[lane_index][row][col] == null:
+					valid_cells.append(Vector2i(row, col))
+
+	return valid_cells
+
+func show_movement_overlay(unit: Dictionary):
+	# Show visual overlays for all cells in the lane
+	# Blue for valid moves, grey for invalid
+	if not unit.has("lane_index"):
+		return
+
+	# Clear any existing overlays
+	clear_movement_overlay()
+
+	var lane_index = unit["lane_index"]
+	valid_move_cells = get_valid_move_cells(unit)
+
+	# Create overlays for all cells in the lane
+	for row in range(GRID_ROWS):
+		for col in range(GRID_COLS):
+			var cell_pos = Vector2i(row, col)
+			var is_valid = false
+
+			# Check if this cell is in the valid moves list
+			for valid_cell in valid_move_cells:
+				if valid_cell.x == row and valid_cell.y == col:
+					is_valid = true
+					break
+
+			# Skip current position
+			if row == unit["grid_row"] and col == unit["grid_col"]:
+				continue
+
+			# Create overlay rect
+			var overlay = ColorRect.new()
+			var world_pos = get_cell_world_position(lane_index, row, col)
+
+			# Position at cell center, adjust for cell size
+			overlay.position = Vector2(world_pos.x - CELL_SIZE / 2, world_pos.y - CELL_SIZE / 2)
+			overlay.size = Vector2(CELL_SIZE, CELL_SIZE)
+
+			# Set color based on validity
+			if is_valid:
+				overlay.color = Color(0.0, 0.5, 1.0, 0.3)  # Blue with transparency
+			else:
+				overlay.color = Color(0.4, 0.4, 0.4, 0.3)  # Grey with transparency
+
+			add_child(overlay)
+			cell_overlays.append(overlay)
+
+func clear_movement_overlay():
+	# Remove all cell overlay visuals
+	for overlay in cell_overlays:
+		overlay.queue_free()
+	cell_overlays.clear()
+	valid_move_cells.clear()
+
+func start_ship_drag(unit: Dictionary, mouse_pos: Vector2):
+	# Start dragging a ship
+	if not unit.has("container") or not unit.has("sprite"):
+		return
+
+	is_dragging_ship = true
+	dragged_ship = unit
+	drag_start_pos = mouse_pos
+
+	# Show movement overlay
+	show_movement_overlay(unit)
+
+	# Create ghost ship
+	create_ghost_ship(unit)
+
+	# Dim the original ship
+	if unit.has("sprite"):
+		unit["sprite"].modulate = Color(0.5, 0.5, 0.5, 0.5)
+
+	print("Started dragging ship: ", unit.get("type", "unknown"))
+
+func create_ghost_ship(unit: Dictionary):
+	# Create a ghost ship that follows the cursor
+	if ghost_ship_container != null:
+		ghost_ship_container.queue_free()
+
+	ghost_ship_container = Control.new()
+	ghost_ship_container.name = "GhostShip"
+	ghost_ship_container.z_index = 100  # Draw on top
+	add_child(ghost_ship_container)
+
+	# Create ghost sprite
+	var ghost_sprite = TextureRect.new()
+	ghost_sprite.texture = unit["sprite"].texture
+	ghost_sprite.custom_minimum_size = Vector2(unit["size"], unit["size"])
+	ghost_sprite.size = Vector2(unit["size"], unit["size"])
+	ghost_sprite.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	ghost_sprite.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	ghost_sprite.modulate = Color(1.0, 1.0, 1.0, 0.5)  # Semi-transparent
+	ghost_sprite.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ghost_ship_container.add_child(ghost_sprite)
+
+	# Position at cursor
+	var mouse_pos = get_global_mouse_position()
+	ghost_ship_container.position = Vector2(mouse_pos.x - unit["size"] / 2, mouse_pos.y - unit["size"] / 2)
+
+func update_ghost_ship_position(mouse_pos: Vector2):
+	# Update ghost ship position to follow cursor
+	if ghost_ship_container != null and dragged_ship.has("size"):
+		ghost_ship_container.position = Vector2(mouse_pos.x - dragged_ship["size"] / 2, mouse_pos.y - dragged_ship["size"] / 2)
+
+func end_ship_drag(mouse_pos: Vector2):
+	# End ship drag and move ship if valid
+	if not is_dragging_ship or dragged_ship.is_empty():
+		return
+
+	# Find which cell the mouse is over
+	var target_cell = get_cell_at_position(mouse_pos, dragged_ship["lane_index"])
+
+	# Check if it's a valid move
+	var is_valid_move = false
+	if target_cell != Vector2i(-1, -1):
+		for valid_cell in valid_move_cells:
+			if valid_cell.x == target_cell.x and valid_cell.y == target_cell.y:
+				is_valid_move = true
+				break
+
+	# Move ship if valid
+	if is_valid_move:
+		move_ship_to_cell(dragged_ship, target_cell)
+	else:
+		# Invalid move - restore original ship appearance
+		if dragged_ship.has("sprite"):
+			dragged_ship["sprite"].modulate = Color(1, 1, 1)
+		print("Invalid move - ship returned to original position")
+
+	# Cleanup
+	cleanup_ship_drag()
+
+func get_cell_at_position(pos: Vector2, lane_index: int) -> Vector2i:
+	# Convert world position to grid cell coordinates
+	var lane_y = lanes[lane_index]["y_position"]
+	var lane_height = GRID_ROWS * CELL_SIZE
+
+	# Calculate which row and column
+	var relative_x = pos.x - GRID_START_X
+	var relative_y = pos.y - (lane_y - lane_height / 2)
+
+	var col = int(relative_x / CELL_SIZE)
+	var row = int(relative_y / CELL_SIZE)
+
+	# Check if within bounds
+	if row >= 0 and row < GRID_ROWS and col >= 0 and col < GRID_COLS:
+		return Vector2i(row, col)
+
+	return Vector2i(-1, -1)
+
+func cleanup_ship_drag():
+	# Clean up drag state
+	if ghost_ship_container != null:
+		ghost_ship_container.queue_free()
+		ghost_ship_container = null
+
+	clear_movement_overlay()
+
+	# Restore original ship appearance if still dragging
+	if not dragged_ship.is_empty() and dragged_ship.has("sprite"):
+		dragged_ship["sprite"].modulate = Color(1, 1, 1)
+
+	is_dragging_ship = false
+	dragged_ship = {}
+	drag_start_pos = Vector2.ZERO
+
+func move_ship_to_cell(unit: Dictionary, target_cell: Vector2i):
+	# Move ship to a new grid cell with animation
+	if not unit.has("grid_row") or not unit.has("grid_col") or not unit.has("lane_index"):
+		return
+
+	var old_row = unit["grid_row"]
+	var old_col = unit["grid_col"]
+	var new_row = target_cell.x
+	var new_col = target_cell.y
+	var lane_index = unit["lane_index"]
+
+	# Free old cell
+	free_grid_cell(lane_index, old_row, old_col)
+
+	# Update unit position
+	unit["grid_row"] = new_row
+	unit["grid_col"] = new_col
+
+	# Occupy new cell
+	occupy_grid_cell(lane_index, new_row, new_col, unit)
+
+	# Calculate new world position
+	var new_world_pos = get_cell_world_position(lane_index, new_row, new_col)
+	var target_pos = Vector2(new_world_pos.x - unit["size"] / 2, new_world_pos.y - unit["size"] / 2)
+
+	# Update original position
+	unit["original_position"] = target_pos
+
+	# Animate ship to new position
+	var container = unit["container"]
+
+	var tween = create_tween()
+	tween.set_trans(Tween.TRANS_CUBIC)
+	tween.set_ease(Tween.EASE_IN_OUT)
+	tween.tween_property(container, "position", target_pos, 0.5)
+
+	# Restore ship appearance and mark as moved
+	tween.finished.connect(func():
+		if unit.has("sprite"):
+			unit["sprite"].modulate = Color(1, 1, 1)
+	)
+
+	# Mark ship as having moved this turn
+	unit["has_moved_this_turn"] = true
+
+	print("Moved ship from (", old_row, ",", old_col, ") to (", new_row, ",", new_col, ")")
 
 func setup_mothership():
 	# Create mothership sprite on the left side
@@ -356,7 +686,7 @@ func setup_turrets():
 		},
 		{
 			"name": "Turret 3",
-			"x": MOTHERSHIP_X + TURRET_X_OFFSET,
+			"x": MOTHERSHIP_X + SECONDARY_TURRET_X_OFFSET,
 			"y": lanes[0]["y_position"],  # Lane 1
 			"enabled": false,
 			"turret_type": "lightning_turret",
@@ -364,7 +694,7 @@ func setup_turrets():
 		},
 		{
 			"name": "Turret 4",
-			"x": MOTHERSHIP_X + TURRET_X_OFFSET,
+			"x": MOTHERSHIP_X + SECONDARY_TURRET_X_OFFSET,
 			"y": lanes[1]["y_position"],  # Lane 2
 			"enabled": false,
 			"turret_type": "cannon_turret",
@@ -372,7 +702,7 @@ func setup_turrets():
 		},
 		{
 			"name": "Turret 5",
-			"x": MOTHERSHIP_X + TURRET_X_OFFSET,
+			"x": MOTHERSHIP_X + SECONDARY_TURRET_X_OFFSET,
 			"y": lanes[2]["y_position"],  # Lane 3
 			"enabled": false,
 			"turret_type": "lightning_turret",
@@ -728,6 +1058,18 @@ func _input(event):
 		get_viewport().set_input_as_handled()
 		return
 
+	# Handle mouse motion for ship dragging
+	if event is InputEventMouseMotion and is_dragging_ship:
+		update_ghost_ship_position(get_global_mouse_position())
+		return
+
+	# Handle mouse button release - end drag
+	if event is InputEventMouseButton and not event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		if is_dragging_ship:
+			end_ship_drag(get_global_mouse_position())
+			get_viewport().set_input_as_handled()
+			return
+
 	# Handle lane click for ship deployment or zoom
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		# Don't process if clicking on UI elements
@@ -748,16 +1090,17 @@ func _input(event):
 				deploy_enemy_to_lane(selected_enemy_type, lane_index)
 				selected_enemy_type = ""  # Clear selection after deployment
 		else:
-			# In tactical view (paused): prioritize lane zoom
-			# But prevent manual zoom when turn mode is active
-			if combat_paused and not is_zoomed and lane_index != -1 and not turn_mode_active:
-				# Tactical view - zoom into lane
-				zoom_to_lane(lane_index)
-			elif is_zoomed:
-				# Zoomed view - allow unit clicking for combat
+			# Check for ship drag ONLY during lane precombat phase (zoomed but paused)
+			if combat_paused and is_zoomed:
 				var clicked_unit = get_unit_at_position(mouse_pos)
 				if clicked_unit != null and not clicked_unit.is_empty():
-					handle_unit_click(clicked_unit)
+					# Check if ship can be moved (hasn't moved this turn)
+					if not clicked_unit.get("has_moved_this_turn", false):
+						start_ship_drag(clicked_unit, mouse_pos)
+						get_viewport().set_input_as_handled()
+						return
+
+			# Manual lane zoom removed - use turn progression button only
 
 func get_lane_at_position(pos: Vector2) -> int:
 	# Determine which lane a position is in
@@ -885,24 +1228,16 @@ func deploy_ship_to_lane(ship_type: String, lane_index: int):
 	var ship_size: int = db_ship_data["size"]
 	var deploy_duration: float = db_ship_data.get("deploy_speed", 3.0)  # Default 3.0s if not specified
 
-	# Calculate target position
-	var num_ships_in_lane = lanes[lane_index]["units"].size()
-	var target_x = SHIP_DEPLOY_X_START + (num_ships_in_lane * SHIP_SPACING)
+	# Find random empty cell in player deployment zone (columns 0-3)
+	var cell = get_random_empty_cell(lane_index, PLAYER_DEPLOY_COLS)
+	if cell == Vector2i(-1, -1):
+		print("ERROR: No empty cells available in lane ", lane_index)
+		return
 
-	# Calculate Y position with vertical stagger to prevent overlap
-	var lane_center_y = lanes[lane_index]["y_position"]
-
-	# Create vertical offset pattern based on ship index
-	var vertical_positions = [
-		-30,  # Upper part of lane
-		0,    # Center of lane
-		30    # Lower part of lane
-	]
-	var y_offset = vertical_positions[num_ships_in_lane % 3]
-
-	# Add additional random offset based on ship size for more natural stagger
-	var random_offset = randf_range(-ship_size * 0.3, ship_size * 0.3)
-	var target_y = lane_center_y + y_offset + random_offset - (ship_size / 2)
+	# Get target position at center of cell
+	var cell_center = get_cell_world_position(lane_index, cell.x, cell.y)
+	var target_x = cell_center.x - (ship_size / 2)
+	var target_y = cell_center.y - (ship_size / 2)
 
 	# Create ship sprite at mothership position
 	var ship_container = Control.new()
@@ -974,6 +1309,16 @@ func deploy_ship_to_lane(ship_type: String, lane_index: int):
 		"original_position": Vector2(target_x, target_y),
 		"idle_state": "waiting",  # States: waiting, drifting, returning
 		"idle_timer": 0.0,
+		"idle_paused": false,  # Paused during lane combat
+
+		# Grid position
+		"grid_row": cell.x,
+		"grid_col": cell.y,
+		"lane_index": lane_index,
+
+		# Movement
+		"movement_speed": db_ship_data.get("movement_speed", 2),  # Hardcoded to 2 for now
+		"has_moved_this_turn": false,
 
 		# Combat stats
 		"stats": db_ship_data["stats"].duplicate(),
@@ -986,6 +1331,9 @@ func deploy_ship_to_lane(ship_type: String, lane_index: int):
 		"ability_name": db_ship_data.get("abilty", ""),
 		"ability_description": db_ship_data.get("ability_description", "")
 	}
+
+	# Mark grid cell as occupied
+	occupy_grid_cell(lane_index, cell.x, cell.y, ship_data)
 
 	# Add to lane data
 	lanes[lane_index]["units"].append(ship_data)
@@ -1015,27 +1363,16 @@ func deploy_enemy_to_lane(enemy_type: String, lane_index: int):
 	var enemy_texture: Texture2D = load(db_enemy_data["sprite_path"])
 	var enemy_size: int = db_enemy_data["size"]
 
-	# Count enemies in the same lane to calculate horizontal position
-	var enemies_in_lane = 0
-	for unit in lanes[lane_index]["units"]:
-		if unit.get("is_enemy", false):
-			enemies_in_lane += 1
+	# Find random empty cell in enemy deployment zone (columns 6-9)
+	var cell = get_random_empty_cell(lane_index, ENEMY_DEPLOY_COLS)
+	if cell == Vector2i(-1, -1):
+		print("ERROR: No empty cells available in lane ", lane_index, " for enemy deployment")
+		return
 
-	var lane_y = lanes[lane_index]["y_position"]
-
-	# Position enemies on the right side (near enemy spawner)
-	# Start from enemy spawner and move left with spacing
-	var x_pos = ENEMY_SPAWN_X - 100 - (enemies_in_lane * 60)  # 60px spacing for enemies
-
-	# Calculate Y position with vertical stagger (same as player ships)
-	var vertical_positions = [
-		-30,  # Upper part of lane
-		0,    # Center of lane
-		30    # Lower part of lane
-	]
-	var y_offset = vertical_positions[enemies_in_lane % 3]
-	var random_offset = randf_range(-enemy_size * 0.3, enemy_size * 0.3)
-	var target_y = lane_y + y_offset + random_offset - (enemy_size / 2)
+	# Get target position at center of cell
+	var cell_center = get_cell_world_position(lane_index, cell.x, cell.y)
+	var x_pos = cell_center.x - (enemy_size / 2)
+	var target_y = cell_center.y - (enemy_size / 2)
 
 	# Create enemy sprite container
 	var enemy_container = Control.new()
@@ -1065,6 +1402,17 @@ func deploy_enemy_to_lane(enemy_type: String, lane_index: int):
 		"size": enemy_size,
 		"is_enemy": true,
 		"position": Vector2(x_pos, target_y),
+		"original_position": Vector2(x_pos, target_y),
+		"idle_paused": false,  # Paused during lane combat
+
+		# Grid position
+		"grid_row": cell.x,
+		"grid_col": cell.y,
+		"lane_index": lane_index,
+
+		# Movement
+		"movement_speed": db_enemy_data.get("movement_speed", 2),  # Hardcoded to 2 for now
+		"has_moved_this_turn": false,
 
 		# Combat stats
 		"stats": db_enemy_data["stats"].duplicate(),
@@ -1077,6 +1425,9 @@ func deploy_enemy_to_lane(enemy_type: String, lane_index: int):
 		"ability_name": db_enemy_data.get("abilty", ""),
 		"ability_description": db_enemy_data.get("ability_description", "")
 	}
+
+	# Mark grid cell as occupied
+	occupy_grid_cell(lane_index, cell.x, cell.y, enemy_data)
 
 	# Add to lane data
 	lanes[lane_index]["units"].append(enemy_data)
@@ -1117,6 +1468,12 @@ func start_ship_idle_behavior(ship_data: Dictionary):
 
 func idle_cycle(ship_data: Dictionary):
 	while is_instance_valid(ship_data["container"]):
+		# Check if idle is paused (during lane combat)
+		if ship_data.get("idle_paused", false):
+			# Skip idle animation while paused, just wait and check again
+			await get_tree().create_timer(0.5).timeout
+			continue
+
 		# Drift backward phase
 		ship_data["idle_state"] = "drifting"
 		await drift_backward(ship_data)
@@ -1129,6 +1486,11 @@ func idle_cycle(ship_data: Dictionary):
 
 		if not is_instance_valid(ship_data["container"]):
 			return
+
+		# Check pause status again before returning
+		if ship_data.get("idle_paused", false):
+			await get_tree().create_timer(0.5).timeout
+			continue
 
 		# Return to position phase
 		ship_data["idle_state"] = "returning"
@@ -1292,8 +1654,9 @@ func zoom_to_lane(lane_index: int):
 	deploy_enemy_button.visible = false
 	auto_deploy_button.visible = false
 
-	# Move ships in this lane into combat positions and wait for completion
-	await move_lane_ships_forward(lane_index)
+	# No longer move ships forward - they stay in their grid squares
+	# Just pause their idle animations
+	pause_lane_idle_animations(lane_index)
 
 	# In turn mode, wait for player to click "Start Combat"
 	# In normal mode, start combat immediately
@@ -1329,8 +1692,10 @@ func _on_return_to_tactical():
 	var prev_lane_index = zoomed_lane_index
 	if prev_lane_index != -1:
 		stop_lane_combat(prev_lane_index)
-		# Return ships to their formation positions
-		return_lane_ships_to_formation(prev_lane_index)
+
+	# Resume idle animations for ALL lanes when returning to tactical view
+	for i in range(NUM_LANES):
+		resume_lane_idle_animations(i)
 
 	is_zoomed = false
 	zoomed_lane_index = -1
@@ -1353,68 +1718,55 @@ func _on_return_to_tactical():
 
 # Lane ship movement functions
 
-func move_lane_ships_forward(lane_index: int):
-	# Move all ships in lane to combat positions (player ships forward, enemies toward player)
+func pause_lane_idle_animations(lane_index: int):
+	# Pause idle animations for all units in the lane
 	if lane_index < 0 or lane_index >= lanes.size():
 		return
 
 	var lane = lanes[lane_index]
-	var movement_tweens = []
-
 	for unit in lane["units"]:
 		if not unit.has("container"):
 			continue
 
-		var container = unit["container"]
-		var current_pos = container.position
-		var is_enemy = unit.get("is_enemy", false)
+		# Mark unit's idle as paused
+		unit["idle_paused"] = true
 
-		# Save original position for returning later
-		unit["zoom_original_position"] = current_pos
+		# Return unit to grid center position if drifting
+		if unit.has("grid_row") and unit.has("grid_col") and unit.has("lane_index"):
+			var container = unit["container"]
+			var cell_center = get_cell_world_position(unit["lane_index"], unit["grid_row"], unit["grid_col"])
+			var target_pos = Vector2(cell_center.x - unit["size"] / 2, cell_center.y - unit["size"] / 2)
 
-		# Determine movement direction:
-		# Player ships move forward (+200px to right)
-		# Enemy ships move backward (-200px to left, toward player)
-		var offset = -200 if is_enemy else 200
-		var target_pos = Vector2(current_pos.x + offset, current_pos.y)
+			# Instantly snap to grid position (no animation)
+			# This prevents conflicts with ship movement tweens
+			container.position = target_pos
 
-		# Animate movement
-		var tween = create_tween()
-		tween.set_trans(Tween.TRANS_CUBIC)
-		tween.set_ease(Tween.EASE_IN_OUT)
-		tween.tween_property(container, "position", target_pos, 0.5)
-		movement_tweens.append(tween)
+	print("Paused idle animations for lane ", lane_index)
 
-	print("Moved ships in lane ", lane_index, " into combat positions")
-
-	# Wait for all tweens to complete
-	if movement_tweens.size() > 0:
-		# Wait for the first tween (they all have same duration)
-		await movement_tweens[0].finished
-
-func return_lane_ships_to_formation(lane_index: int):
-	# Return all ships in lane to their formation positions
+func resume_lane_idle_animations(lane_index: int):
+	# Resume idle animations for all units in the lane
 	if lane_index < 0 or lane_index >= lanes.size():
 		return
 
 	var lane = lanes[lane_index]
 	for unit in lane["units"]:
-		if not unit.has("container") or not unit.has("zoom_original_position"):
+		if not unit.has("container"):
 			continue
 
-		var container = unit["container"]
-		var original_pos = unit["zoom_original_position"]
+		# Ensure unit is at grid center position
+		if unit.has("grid_row") and unit.has("grid_col") and unit.has("lane_index"):
+			var container = unit["container"]
+			var cell_center = get_cell_world_position(unit["lane_index"], unit["grid_row"], unit["grid_col"])
+			var target_pos = Vector2(cell_center.x - unit["size"] / 2, cell_center.y - unit["size"] / 2)
 
-		# Animate movement back
-		var tween = create_tween()
-		tween.set_trans(Tween.TRANS_CUBIC)
-		tween.set_ease(Tween.EASE_IN_OUT)
-		tween.tween_property(container, "position", original_pos, 0.5)
+			# Update original position to grid center
+			unit["original_position"] = target_pos
+			container.position = target_pos
 
-		# Clear saved position
-		unit.erase("zoom_original_position")
+		# Unpause idle animation
+		unit["idle_paused"] = false
 
-	print("Returned ships in lane ", lane_index, " to formation")
+	print("Resumed idle animations for lane ", lane_index)
 
 func start_zoom_timer():
 	# Start 5-second timer for auto-return to tactical view
@@ -1773,6 +2125,12 @@ func destroy_ship(ship: Dictionary):
 			if index != -1:
 				lane["units"].remove_at(index)
 				print("Ship removed from lane ", lane["index"])
+
+				# Free the grid cell if ship has grid position
+				if ship.has("grid_row") and ship.has("grid_col") and ship.has("lane_index"):
+					free_grid_cell(ship["lane_index"], ship["grid_row"], ship["grid_col"])
+					print("Grid cell freed at row=", ship["grid_row"], " col=", ship["grid_col"])
+
 				break
 
 	# In auto-combat or lane combat, reassign targets for any units that were targeting this destroyed object
@@ -1863,6 +2221,13 @@ func proceed_to_next_lane():
 		current_turn_phase = "lane_2"
 
 	if target_lane >= 0:
+		# Ensure combat is paused for precombat phase
+		combat_paused = true
+		print("Combat PAUSED - entering precombat phase for lane ", target_lane)
+
+		# Reset movement flags for this lane's precombat phase
+		reset_ship_movement_flags()
+
 		# Zoom to the lane
 		zoom_to_lane(target_lane)
 
@@ -1876,6 +2241,10 @@ func start_combat_phase():
 	if not is_zoomed or zoomed_lane_index < 0:
 		print("ERROR: Trying to start combat but not zoomed into a lane")
 		return
+
+	# Clean up any active drag state
+	if is_dragging_ship:
+		cleanup_ship_drag()
 
 	# Hide the button during combat
 	if turn_progression_button:
@@ -1914,11 +2283,26 @@ func proceed_to_lane_transition(next_lane_index: int, next_phase: String):
 	# Transition to the next lane
 	print("Transitioning to lane ", next_lane_index)
 
+	# Clean up any active drag state
+	if is_dragging_ship:
+		cleanup_ship_drag()
+
 	# Stop current lane combat
 	stop_lane_combat(zoomed_lane_index)
 
+	# Resume idle animations for the previous lane (now out of focus)
+	if zoomed_lane_index >= 0:
+		resume_lane_idle_animations(zoomed_lane_index)
+
+	# Pause combat for precombat phase
+	combat_paused = true
+	print("Combat PAUSED - entering precombat phase for lane ", next_lane_index)
+
 	# Update phase
 	current_turn_phase = next_phase
+
+	# Reset movement flags for this lane's precombat phase
+	reset_ship_movement_flags()
 
 	# Zoom to next lane
 	zoom_to_lane(next_lane_index)
@@ -1940,10 +2324,21 @@ func return_to_tactical_phase():
 	current_turn_phase = "tactical"
 	waiting_for_combat_start = false
 
+	# Reset movement flags for all units (new turn)
+	reset_ship_movement_flags()
+
 	# Show proceed button for next turn
 	if turn_progression_button:
 		turn_progression_button.text = "Proceed to Lane 1"
 		turn_progression_button.visible = true
+
+func reset_ship_movement_flags():
+	# Reset the has_moved_this_turn flag for all units
+	# Called at the start of each new turn (tactical phase)
+	for lane in lanes:
+		for unit in lane["units"]:
+			unit["has_moved_this_turn"] = false
+	print("Reset movement flags for all ships")
 
 func start_lane_combat(lane_index: int):
 	# Start combat for all ships in a specific lane (when zoomed in)
@@ -2196,7 +2591,6 @@ func assign_random_target(unit: Dictionary, restrict_to_lane: int = -1):
 		return
 
 	var is_enemy = unit.get("is_enemy", false)
-	var potential_targets: Array[Dictionary] = []
 
 	# Determine which lane this unit is in
 	var unit_lane_index = -1
@@ -2205,7 +2599,8 @@ func assign_random_target(unit: Dictionary, restrict_to_lane: int = -1):
 			unit_lane_index = lane["index"]
 			break
 
-	# Find all valid targets (opposite faction)
+	# Priority 1: Ships in the same lane
+	var ship_targets: Array[Dictionary] = []
 	for lane in lanes:
 		# Skip lanes if we're restricting to a specific lane
 		if restrict_to_lane >= 0 and lane["index"] != restrict_to_lane:
@@ -2218,7 +2613,13 @@ func assign_random_target(unit: Dictionary, restrict_to_lane: int = -1):
 		for other_unit in lane["units"]:
 			var other_is_enemy = other_unit.get("is_enemy", false)
 			if is_enemy != other_is_enemy:  # Opposite factions
-				potential_targets.append(other_unit)
+				ship_targets.append(other_unit)
+
+	# Priority 2: Secondary turrets (in-lane turrets with single target_lane)
+	var secondary_turret_targets: Array[Dictionary] = []
+
+	# Priority 3: Bi-lane turrets (turrets with multiple target_lanes)
+	var bilane_turret_targets: Array[Dictionary] = []
 
 	# If this is an enemy, also consider turrets as targets
 	if is_enemy:
@@ -2226,14 +2627,30 @@ func assign_random_target(unit: Dictionary, restrict_to_lane: int = -1):
 			if not turret["enabled"]:
 				continue
 
+			# Determine which lane to check
+			var check_lane = restrict_to_lane if restrict_to_lane >= 0 else unit_lane_index
+
 			# Check if turret is in a valid lane for targeting
-			if restrict_to_lane >= 0:
-				# Only target turrets that defend this specific lane
-				if restrict_to_lane in turret["target_lanes"]:
-					potential_targets.append(turret)
-			else:
-				# No lane restriction - all enabled turrets are valid targets
-				potential_targets.append(turret)
+			if check_lane >= 0 and check_lane in turret["target_lanes"]:
+				# Separate by turret type
+				if turret["target_lanes"].size() == 1:
+					# Secondary turret (in-lane, single target lane)
+					secondary_turret_targets.append(turret)
+				else:
+					# Bi-lane turret (multiple target lanes)
+					bilane_turret_targets.append(turret)
+
+	# Select from highest priority non-empty group
+	var potential_targets: Array[Dictionary] = []
+	if not ship_targets.is_empty():
+		potential_targets = ship_targets
+		# print("Targeting ships (priority 1)")
+	elif not secondary_turret_targets.is_empty():
+		potential_targets = secondary_turret_targets
+		# print("Targeting secondary turrets (priority 2)")
+	elif not bilane_turret_targets.is_empty():
+		potential_targets = bilane_turret_targets
+		# print("Targeting bi-lane turrets (priority 3)")
 
 	# If no targets, clear auto_target
 	if potential_targets.is_empty():
@@ -2241,7 +2658,7 @@ func assign_random_target(unit: Dictionary, restrict_to_lane: int = -1):
 		print("No targets available for ", unit.get("type", "unknown"))
 		return
 
-	# Pick random target
+	# Pick random target from the selected priority group
 	var random_index = randi() % potential_targets.size()
 	var target = potential_targets[random_index]
 	unit["auto_target"] = target
