@@ -1,15 +1,12 @@
-[gd_scene load_steps=2 format=3 uid="uid://tqc6i2i2tyng"]
+[gd_scene load_steps=3 format=3 uid="uid://tqc6i2i2tyng"]
 
 [ext_resource type="Script" uid="uid://s7awonapbij8" path="res://scripts/Combat_2.gd" id="1_combat2"]
+[ext_resource type="PackedScene" uid="uid://b2qc8h3v7n4xm" path="res://scenes/BackgroundManager.tscn" id="2_background"]
 
 [node name="Combat_2" type="Node2D"]
 script = ExtResource("1_combat2")
 
-[node name="Background" type="ColorRect" parent="."]
-z_index = -1
-offset_right = 1152.0
-offset_bottom = 648.0
-color = Color(0.1, 0.1, 0.15, 1)
+[node name="BackgroundManager" parent="." instance=ExtResource("2_background")]
 
 [node name="UI" type="CanvasLayer" parent="."]
 

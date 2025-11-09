@@ -383,20 +383,101 @@ TODO: The  UI has two additionlal resources, needs a proper window, and also nee
   - Console logging for ability casts
 - [ ] Ability effects (not yet implemented - functions are placeholders)
 
-### 2.15 NOT YET IMPLEMENTED
+### 2.15 Background System Refactoring ✓ COMPLETED
+- [x] Separate BackgroundManager module
+  - Extracted all background logic from Combat_2.gd
+  - BackgroundManager.gd handles tiled static background and parallax layers
+  - Reusable BackgroundManager.tscn scene
+  - Export variables for customization (scroll speed, direction, opacity)
+  - Background tiles larger than window size for full coverage
+- [x] Background system features
+  - Static space background (Space2.png tiled at z:-100)
+  - Parallax scrolling layer (stones1.png at z:-50)
+  - Seamless infinite scrolling with wrapping
+  - Configurable scroll direction and speed
+  - Helper functions for runtime adjustments
+
+### 2.16 Targeting System Enhancements ✓ COMPLETED
+- [x] Beta targeting mode (row-focused combat)
+  - targeting_function_beta() with strict row-based priority
+  - Priority: Same row → Turrets → Mothership → Any lane
+  - More focused than alpha mode (skips adjacent rows)
+  - Creates tighter row-vs-row combat formations
+- [x] Debug UI integration
+  - Beta buttons added for player and enemy targeting
+  - Three targeting modes: alpha, beta, random
+  - Status label automatically displays current modes
+  - Targeting mode changes reassign all unit targets
+- [x] Targeting system architecture
+  - assign_random_target() dispatcher supports all modes
+  - Helper functions shared across modes (find_closest_in_row, etc.)
+  - Mode selection per faction (player_targeting_mode, enemy_targeting_mode)
+
+### 2.17 Projectile System Improvements ✓ COMPLETED
+- [x] Missed projectiles continue traveling
+  - Projectiles that miss don't destroy immediately
+  - continue_laser_off_screen() function handles misses
+  - Projectiles travel until completely off-screen
+  - Automatic cleanup after off-screen (~1.3s additional travel)
+  - Creates realistic combat feedback for misses
+- [x] Dynamic projectile loading from database
+  - projectile_sprite and projectile_size from ship_database.csv
+  - Each ship/turret can have unique projectile appearance
+  - Projectile size varies by unit type (3-50 pixels)
+  - Examples: Mook (3px), Fighter (8px), Interceptor (40px), Turrets (30-50px)
+  - Default fallbacks if CSV data missing
+- [x] Attack speed bug fix
+  - Fixed turret attack timing to match ships
+  - Correct formula: attack_interval = 1.0 / attack_speed
+  - attack_speed now consistent across all unit types
+  - attack_speed = 1.0 → 1 attack/second
+  - attack_speed = 0.5 → 0.5 attacks/second (2s interval)
+
+### 2.18 Grid-Based Movement System ✓ COMPLETED
+- [x] Grid cell system
+  - 5 rows × 16 columns per lane
+  - 32px cell size
+  - Player deployment zone: columns 0-3
+  - Enemy deployment zone: columns 12-15
+  - Grid occupancy tracking per lane
+- [x] Ship movement mechanics
+  - Drag-and-drop ship repositioning
+  - Valid move detection (adjacent cells only)
+  - Visual feedback (green/red cell overlays)
+  - Grid cell occupation/release
+  - Smooth animation to new position
+  - has_moved_this_turn flag prevents multiple moves
+
+### 2.19 Turret System ✓ COMPLETED
+- [x] Turret placement and configuration
+  - 5 turrets total (2 primary, 3 secondary)
+  - Positioned at mothership + offsets
+  - Each turret targets specific lanes
+  - 100px turret size, health bars above
+- [x] Turret combat
+  - Auto-targeting enemies in target lanes
+  - Attack timers based on turret attack_speed
+  - Target switching every 3 seconds
+  - Turrets can be targeted and destroyed by enemies
+  - Turret data loaded from ship_database.csv
+- [x] Lane-specific turret activation
+  - Turrets activate during lane combat phase
+  - Only attack enemies in active lane
+  - Return to multi-lane targeting after combat
+
+### 2.20 NOT YET IMPLEMENTED
 The following systems from the original plan are not yet implemented:
 
 - [ ] Card system (hand, draw, discard, card play mechanics)
 - [ ] Enemy wave system and AI movement
 - [ ] Pilot system
-- [ ] Turret system
 - [ ] Powerup system
 - [ ] Drone system
 - [ ] Victory/defeat conditions
 - [ ] Rewards system
-- [ ] VFX and particle effects beyond basic hit flash
+- [ ] VFX and particle effects beyond basic hit flash and off-screen projectiles
 - [ ] Combo system
-- [ ] Actual ability effect implementations
+- [ ] Actual ability effect implementations (function stubs exist)
 
 ---
 
@@ -544,7 +625,7 @@ StarMap → ...
 4. Ship positioning and staggering
 5. Idle behavior system
 6. Lane zoom functionality
-7. Parallax background system
+7. Parallax background system (refactored into BackgroundManager module)
 8. CSV-driven ship database system
 9. ShipDatabase singleton with dynamic loading
 10. Combat targeting system (click-to-attack)
@@ -556,9 +637,45 @@ StarMap → ...
 16. **Auto-Combat System** - Auto-targeting, target switching, continuous attacks
 17. **Turn-Based Combat Structure** - Sequential lane combat, turn progression button
 18. **Energy & Ability System** - Energy generation, ability auto-cast (effects not yet implemented)
+19. **BackgroundManager Module** - Separate background system with parallax layers
+20. **Beta Targeting Mode** - Row-focused combat targeting option
+21. **Projectile Miss Behavior** - Missed projectiles continue off-screen before cleanup
+22. **Dynamic Projectile System** - Projectile sprites and sizes loaded from CSV database
+23. **Attack Speed Fix** - Corrected turret attack timing to match ship formula
+24. **Grid-Based Movement** - Drag-and-drop ship repositioning with valid move detection
+25. **Turret System** - 5 turrets with lane-specific targeting and combat integration
 
-### Immediate Next Steps - CARD MECHANICS
-The combat sandbox is now nearly complete. Next focus is implementing the card system:
+### Immediate Next Steps - ABILITY SYSTEM
+The combat mechanics are solid. Next focus is implementing ship abilities:
+
+**Priority 1: Ability Implementation Framework**
+1. **Ability Execution System**
+   - Execute ability functions dynamically from ship data
+   - Pass unit and target context to ability functions
+   - Handle ability cooldowns and energy costs
+   - Visual feedback for ability activation
+
+2. **Core Ability Functions**
+   - Implement placeholder abilities for testing
+   - Alpha Strike (Interceptor): Double attack speed for 5s
+   - Missile Lock (Fighter): 20 explosion damage to target
+   - Shield Battery (Frigate): Restore 40% shields to lane
+   - Acid Splash (Elite): 10 acid damage + corrosion stack
+   - Lightning Cannon (Turret): Strip shields from all in lane
+   - Torpedo Launch (Corvette): 50 damage (100 vs reinforced armor)
+
+3. **Ability UI**
+   - Ability ready indicators on ships
+   - Visual effects for ability activation
+   - Energy bar improvements for readability
+
+4. **Ability Testing**
+   - Test each ability function
+   - Balance energy costs and effects
+   - Verify ability interactions with combat
+
+**After Abilities - CARD MECHANICS**
+Once abilities work, implement the card system:
 
 1. **Card Hand UI**
    - Display player hand at bottom of screen (UI layer)

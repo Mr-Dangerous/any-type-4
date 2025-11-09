@@ -52,16 +52,6 @@ var zoom_timer_label: Label = null
 
 # Idle behavior constants
 
-# Background variables
-var bg_scroll_direction: Vector2 = Vector2(1, 0)  # Direction of parallax scroll
-var bg_scroll_speed: float = 10.0  # Pixels per second
-var bg_tile_size: float = 1.0  # Scale multiplier for Space2.png tiles
-var parallax_offset: Vector2 = Vector2.ZERO  # Current parallax offset
-
-# Background nodes
-var space_background: Node2D = null
-var parallax_background: Node2D = null
-
 # Debug system
 var debug_panel: Panel = null
 var debug_button: Button = null
@@ -69,14 +59,6 @@ var player_targeting_mode: String = "alpha"  # "random" or "alpha"
 var enemy_targeting_mode: String = "alpha"   # "random" or "alpha"
 
 func _ready():
-	# Hide the existing solid background so we can see our space backgrounds
-	var old_background = get_node_or_null("Background")
-	if old_background:
-		old_background.visible = false
-
-	# Setup backgrounds first (render behind everything)
-	setup_backgrounds()
-
 	# Setup camera
 	camera = Camera2D.new()
 	camera.name = "Camera"
@@ -129,107 +111,10 @@ func _ready():
 	print("Combat_2 initialized with tactical view")
 
 func _process(delta):
-	# Update parallax background scrolling
-	if parallax_background:
-		parallax_offset += bg_scroll_direction.normalized() * bg_scroll_speed * delta
-
-		# Get texture size for wrapping
-		var tex_width = CombatConstants.Stones1Texture.get_width()
-		var tex_height = CombatConstants.Stones1Texture.get_height()
-
-		# Wrap the offset to create seamless loop
-		if parallax_offset.x > tex_width:
-			parallax_offset.x -= tex_width
-		elif parallax_offset.x < -tex_width:
-			parallax_offset.x += tex_width
-
-		if parallax_offset.y > tex_height:
-			parallax_offset.y -= tex_height
-		elif parallax_offset.y < -tex_height:
-			parallax_offset.y += tex_height
-
-		# Update all parallax sprite positions
-		for child in parallax_background.get_children():
-			if child is Sprite2D:
-				var base_pos = child.get_meta("base_position")
-				child.position = base_pos + parallax_offset
-
 	# Update zoom timer label
 	if zoom_timer and zoom_timer_label and zoom_timer_label.visible:
 		var time_left = zoom_timer.time_left
 		zoom_timer_label.text = "LANE %d: %ds" % [zoomed_lane_index + 1, ceil(time_left)]
-
-func setup_backgrounds():
-	# Create static space background (tiled)
-	space_background = Node2D.new()
-	space_background.name = "SpaceBackground"
-	space_background.z_index = -100
-	add_child(space_background)
-
-	# Tile Space2.png across the screen
-	var screen_size = Vector2(1152, 648)
-	var tex_size = CombatConstants.Space2Texture.get_size() * bg_tile_size
-	var tiles_x = ceil(screen_size.x / tex_size.x) + 1
-	var tiles_y = ceil(screen_size.y / tex_size.y) + 1
-
-	print("Creating space background tiles: ", tiles_x, "x", tiles_y)
-	print("Space2 texture size: ", CombatConstants.Space2Texture.get_size())
-
-	for x in range(tiles_x):
-		for y in range(tiles_y):
-			var sprite = Sprite2D.new()
-			sprite.texture = CombatConstants.Space2Texture
-			sprite.scale = Vector2(bg_tile_size, bg_tile_size)
-			sprite.position = Vector2(x * tex_size.x, y * tex_size.y)
-			sprite.centered = false
-			sprite.z_index = -100  # Ensure it's behind
-			space_background.add_child(sprite)
-
-	# Create parallax background (stones1 scrolling)
-	parallax_background = Node2D.new()
-	parallax_background.name = "ParallaxBackground"
-	parallax_background.z_index = -50
-	add_child(parallax_background)
-
-	# Create a 3x3 grid of stones for seamless scrolling
-	var stones_tex_size = CombatConstants.Stones1Texture.get_size()
-	print("Creating parallax stones, texture size: ", stones_tex_size)
-
-	for x in range(-1, 2):
-		for y in range(-1, 2):
-			var sprite = Sprite2D.new()
-			sprite.texture = CombatConstants.Stones1Texture
-			sprite.centered = false
-			sprite.modulate.a = 0.7  # Make slightly transparent
-			var base_pos = Vector2(x * stones_tex_size.x, y * stones_tex_size.y)
-			sprite.position = base_pos
-			sprite.z_index = -50
-			sprite.set_meta("base_position", base_pos)
-			parallax_background.add_child(sprite)
-
-	print("Backgrounds created - Space at z:-100, Parallax at z:-50")
-
-func update_background_tiles():
-	# Rebuild space background with new tile size
-	if space_background:
-		# Clear old tiles
-		for child in space_background.get_children():
-			child.queue_free()
-
-		# Create new tiles
-		var screen_size = Vector2(1152, 648)
-		var tex_size = CombatConstants.Space2Texture.get_size() * bg_tile_size
-		var tiles_x = ceil(screen_size.x / tex_size.x) + 1
-		var tiles_y = ceil(screen_size.y / tex_size.y) + 1
-
-		for x in range(tiles_x):
-			for y in range(tiles_y):
-				var sprite = Sprite2D.new()
-				sprite.texture = CombatConstants.Space2Texture
-				sprite.scale = Vector2(bg_tile_size, bg_tile_size)
-				sprite.position = Vector2(x * tex_size.x, y * tex_size.y)
-				sprite.centered = false
-				space_background.add_child(sprite)
 
 func initialize_lanes():
 	# Create 3 lanes
@@ -721,6 +606,8 @@ func create_turret(turret_name: String, turret_type: String, x_pos: float, y_pos
 				"starting_energy": db_turret_data.get("starting_energy", 0)
 			},
 			"current_energy": db_turret_data.get("starting_energy", 0),
+			"projectile_sprite": db_turret_data.get("projectile_sprite", "res://assets/Effects/laser_light/s_laser_light_001.png"),
+			"projectile_size": db_turret_data.get("projectile_size", 30),
 			"ability_function": db_turret_data.get("ability_function", ""),
 			"ability_name": db_turret_data.get("abilty", ""),
 			"ability_description": db_turret_data.get("ability_description", "")
@@ -1278,6 +1165,10 @@ func deploy_ship_to_lane(ship_type: String, lane_index: int):
 		"current_shield": db_ship_data["stats"]["shield"],
 		"current_energy": db_ship_data["stats"]["starting_energy"],
 
+		# Projectile data
+		"projectile_sprite": db_ship_data.get("projectile_sprite", "res://assets/Effects/laser_light/s_laser_light_001.png"),
+		"projectile_size": db_ship_data.get("projectile_size", 6),
+
 		# Ability data
 		"ability_function": db_ship_data.get("ability_function", ""),
 		"ability_name": db_ship_data.get("abilty", ""),
@@ -1371,6 +1262,10 @@ func deploy_enemy_to_lane(enemy_type: String, lane_index: int):
 		"current_armor": db_enemy_data["stats"]["armor"],
 		"current_shield": db_enemy_data["stats"]["shield"],
 		"current_energy": db_enemy_data["stats"]["starting_energy"],
+
+		# Projectile data
+		"projectile_sprite": db_enemy_data.get("projectile_sprite", "res://assets/Effects/laser_light/s_laser_light_001.png"),
+		"projectile_size": db_enemy_data.get("projectile_size", 6),
 
 		# Ability data
 		"ability_function": db_enemy_data.get("ability_function", ""),
@@ -1578,35 +1473,49 @@ func setup_debug_ui():
 	player_alpha_btn.pressed.connect(func(): set_player_targeting("alpha"))
 	debug_panel.add_child(player_alpha_btn)
 
+	var player_beta_btn = Button.new()
+	player_beta_btn.text = "Beta"
+	player_beta_btn.position = Vector2(180, 95)
+	player_beta_btn.custom_minimum_size = Vector2(90, 35)
+	player_beta_btn.pressed.connect(func(): set_player_targeting("beta"))
+	debug_panel.add_child(player_beta_btn)
+
 	# Enemy targeting label
 	var enemy_label = Label.new()
 	enemy_label.text = "Enemy Targeting:"
-	enemy_label.position = Vector2(10, 120)
+	enemy_label.position = Vector2(10, 145)
 	enemy_label.add_theme_font_size_override("font_size", 16)
 	debug_panel.add_child(enemy_label)
 
 	# Enemy targeting buttons
 	var enemy_random_btn = Button.new()
 	enemy_random_btn.text = "Random"
-	enemy_random_btn.position = Vector2(180, 115)
+	enemy_random_btn.position = Vector2(180, 140)
 	enemy_random_btn.custom_minimum_size = Vector2(90, 35)
 	enemy_random_btn.pressed.connect(func(): set_enemy_targeting("random"))
 	debug_panel.add_child(enemy_random_btn)
 
 	var enemy_alpha_btn = Button.new()
 	enemy_alpha_btn.text = "Alpha"
-	enemy_alpha_btn.position = Vector2(280, 115)
+	enemy_alpha_btn.position = Vector2(280, 140)
 	enemy_alpha_btn.custom_minimum_size = Vector2(90, 35)
 	enemy_alpha_btn.toggle_mode = true
 	enemy_alpha_btn.button_pressed = true  # Alpha is default
 	enemy_alpha_btn.pressed.connect(func(): set_enemy_targeting("alpha"))
 	debug_panel.add_child(enemy_alpha_btn)
 
+	var enemy_beta_btn = Button.new()
+	enemy_beta_btn.text = "Beta"
+	enemy_beta_btn.position = Vector2(180, 180)
+	enemy_beta_btn.custom_minimum_size = Vector2(90, 35)
+	enemy_beta_btn.pressed.connect(func(): set_enemy_targeting("beta"))
+	debug_panel.add_child(enemy_beta_btn)
+
 	# Current status label
 	var status_label = Label.new()
 	status_label.name = "StatusLabel"
 	status_label.text = "Player: Alpha | Enemy: Alpha"
-	status_label.position = Vector2(10, 180)
+	status_label.position = Vector2(10, 230)
 	status_label.add_theme_font_size_override("font_size", 14)
 	status_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
 	debug_panel.add_child(status_label)
@@ -1614,7 +1523,7 @@ func setup_debug_ui():
 	# Close button
 	var close_btn = Button.new()
 	close_btn.text = "Close"
-	close_btn.position = Vector2(300, 250)
+	close_btn.position = Vector2(300, 260)
 	close_btn.custom_minimum_size = Vector2(80, 35)
 	close_btn.pressed.connect(_on_debug_close_pressed)
 	debug_panel.add_child(close_btn)
@@ -1992,21 +1901,26 @@ func fire_single_laser():
 	var direction = end_pos - start_pos
 	var angle = direction.angle()
 
-	# Create laser sprite (small projectile)
+	# Get projectile sprite and size from attacker data
+	var projectile_sprite_path = selected_attacker.get("projectile_sprite", "res://assets/Effects/laser_light/s_laser_light_001.png")
+	var projectile_pixel_size = selected_attacker.get("projectile_size", 6)
+	var projectile_texture: Texture2D = load(projectile_sprite_path)
+
+	# Create laser sprite (projectile)
 	var laser = Sprite2D.new()
-	laser.texture = CombatConstants.LaserTexture
+	laser.texture = projectile_texture
 	laser.position = start_pos
 	laser.rotation = angle
 	laser.z_index = 1  # Above ships
 	add_child(laser)
 
-	# Scale laser to be 6 pixels tall
-	var laser_height = CombatConstants.LaserTexture.get_height()
-	var scale_y = 6.0 / laser_height
+	# Scale laser to desired pixel height
+	var laser_height = projectile_texture.get_height()
+	var scale_y = float(projectile_pixel_size) / laser_height
 	laser.scale = Vector2(scale_y, scale_y)  # Uniform scale to maintain aspect ratio
 
 	# Center the sprite
-	laser.offset = Vector2(-CombatConstants.LaserTexture.get_width() / 2, -CombatConstants.LaserTexture.get_height() / 2)
+	laser.offset = Vector2(-projectile_texture.get_width() / 2, -projectile_texture.get_height() / 2)
 
 	# Animate laser: fly quickly to target (0.2 seconds)
 	var flight_duration = 0.2
@@ -2018,24 +1932,66 @@ func fire_single_laser():
 	)
 
 func on_laser_hit(laser: Sprite2D):
-	# Handle laser hitting the target
-	# Remove the laser projectile
-	laser.queue_free()
+	# Handle laser reaching target position
+	# If hit: destroy laser and apply damage
+	# If miss: continue traveling until off-screen
 
 	# Calculate and apply damage
+	var damage_dealt = 0
 	if not selected_attacker.is_empty() and not selected_target.is_empty():
-		var damage_dealt = calculate_damage(selected_attacker, selected_target)
+		damage_dealt = calculate_damage(selected_attacker, selected_target)
 		if damage_dealt > 0:
 			apply_damage(selected_target, damage_dealt)
 
-	# Flash the target
-	if not selected_target.is_empty() and selected_target.has("sprite"):
-		var target_sprite = selected_target["sprite"]
+	# Check if attack hit or missed
+	if damage_dealt > 0:
+		# HIT - Remove the laser projectile
+		laser.queue_free()
 
-		# Create flash animation - white flash then back to normal
-		var flash_tween = create_tween()
-		flash_tween.tween_property(target_sprite, "modulate", Color(2.0, 2.0, 2.0, 1.0), 0.05)  # Flash white
-		flash_tween.tween_property(target_sprite, "modulate", Color(1.0, 1.0, 1.0, 1.0), 0.1)   # Return to normal
+		# Flash the target
+		if not selected_target.is_empty() and selected_target.has("sprite"):
+			var target_sprite = selected_target["sprite"]
+
+			# Create flash animation - white flash then back to normal
+			var flash_tween = create_tween()
+			flash_tween.tween_property(target_sprite, "modulate", Color(2.0, 2.0, 2.0, 1.0), 0.05)  # Flash white
+			flash_tween.tween_property(target_sprite, "modulate", Color(1.0, 1.0, 1.0, 1.0), 0.1)   # Return to normal
+	else:
+		# MISS - Continue traveling in same direction until off-screen
+		continue_laser_off_screen(laser)
+
+func continue_laser_off_screen(laser: Sprite2D):
+	# Continue laser traveling in its current direction until it goes off-screen
+	# Screen bounds: 1152x648 (from Combat_2.tscn)
+	# Add extra margin to ensure complete cleanup
+
+	if not is_instance_valid(laser):
+		return
+
+	# Get current position and rotation
+	var current_pos = laser.position
+	var angle = laser.rotation
+
+	# Calculate direction vector from rotation
+	var direction = Vector2(cos(angle), sin(angle))
+
+	# Calculate distance needed to go completely off-screen
+	# Use screen diagonal + margin to ensure it's fully off-screen
+	var screen_size = Vector2(1152, 648)
+	var max_distance = screen_size.length() + 200  # Diagonal + margin
+
+	# Calculate final off-screen position
+	var off_screen_pos = current_pos + (direction * max_distance)
+
+	# Animate laser to off-screen position
+	var travel_duration = max_distance / 1000.0  # Speed: ~1000 pixels/second
+	var tween = create_tween()
+	tween.tween_property(laser, "position", off_screen_pos, travel_duration)
+	tween.tween_callback(func():
+		# Destroy laser once it's off-screen
+		if is_instance_valid(laser):
+			laser.queue_free()
+	)
 
 func calculate_damage(attacker: Dictionary, target: Dictionary) -> int:
 	# Calculate damage from attacker to target
@@ -2585,7 +2541,12 @@ func start_turret_attack_timer(turret: Dictionary):
 	# Create attack timer
 	var attack_timer = Timer.new()
 	attack_timer.name = "AttackTimer"
-	attack_timer.wait_time = turret["stats"]["attack_speed"]
+	# Calculate attack interval: 1 / attack_speed = seconds per attack
+	# attack_speed of 1.0 = 1 attack/second = 1.0s per attack
+	# attack_speed of 0.5 = 0.5 attacks/second = 2.0s per attack
+	# attack_speed of 2.0 = 2 attacks/second = 0.5s per attack
+	var attack_interval = 1.0 / turret["stats"]["attack_speed"]
+	attack_timer.wait_time = attack_interval
 	attack_timer.one_shot = false
 	attack_timer.timeout.connect(func(): execute_turret_attack(turret))
 	container.add_child(attack_timer)
@@ -2873,11 +2834,59 @@ func targeting_function_alpha(unit: Dictionary) -> Dictionary:
 	return {}
 
 # ============================================================================
+# BETA TARGETING FUNCTION (Row-focused combat)
+# ============================================================================
+
+func targeting_function_beta(unit: Dictionary) -> Dictionary:
+	# Beta row-based targeting with strict row focus:
+	# 1. Ships in same row only (same lane + grid_row)
+	# 2. Turrets/spawners in lane (if no same-row ships)
+	# 3. Mothership/boss (if no turrets)
+	# 4. Any ship in same lane (fallback, ignores row)
+	# 5. No target (return empty)
+
+	if unit.is_empty():
+		return {}
+
+	var unit_lane = unit.get("lane_index", -1)
+	var unit_row = unit.get("grid_row", -1)
+	var is_enemy = unit.get("is_enemy", false)
+
+	# Priority 1: Same row only (strict row-based combat)
+	var same_row_target = find_closest_in_row(unit, unit_lane, unit_row, is_enemy)
+	if not same_row_target.is_empty():
+		print("  [Beta] ", unit.get("type"), " → same row: ", same_row_target.get("type"))
+		return same_row_target
+
+	# Priority 2: Turrets/spawners in lane
+	var turret_target = find_targetable_turret(unit, unit_lane, is_enemy)
+	if not turret_target.is_empty():
+		print("  [Beta] ", unit.get("type"), " → turret: ", turret_target.get("type"))
+		return turret_target
+
+	# Priority 3: Mothership/boss (enemy units target player mothership)
+	if is_enemy:
+		# Find player mothership (stored in turrets array as special entry)
+		# The mothership is not currently a targetable object, so we skip this
+		# In the future, this could target a mothership Dictionary
+		pass
+
+	# Priority 4: Any ship in same lane (fallback)
+	var lane_target = find_any_in_lane(unit, unit_lane, is_enemy)
+	if not lane_target.is_empty():
+		print("  [Beta] ", unit.get("type"), " → any in lane: ", lane_target.get("type"))
+		return lane_target
+
+	# Priority 5: No target
+	print("  [Beta] ", unit.get("type"), " → no targets available")
+	return {}
+
+# ============================================================================
 # CURRENT TARGETING FUNCTION (uses targeting_function_alpha)
 # ============================================================================
 
 func assign_random_target(unit: Dictionary, restrict_to_lane: int = -1):
-	# Assign a target to a unit based on current targeting mode (alpha or random)
+	# Assign a target to a unit based on current targeting mode (alpha, beta, or random)
 	# Checks is_enemy flag to determine which targeting mode to use
 
 	if unit.is_empty():
@@ -2891,6 +2900,8 @@ func assign_random_target(unit: Dictionary, restrict_to_lane: int = -1):
 	var target = {}
 	if target_mode == "alpha":
 		target = targeting_function_alpha(unit)
+	elif target_mode == "beta":
+		target = targeting_function_beta(unit)
 	else:  # "random"
 		target = targeting_function_random(unit, restrict_to_lane)
 
@@ -3134,19 +3145,24 @@ func auto_fire_single_laser(attacker: Dictionary, target: Dictionary):
 	var direction = end_pos - start_pos
 	var angle = direction.angle()
 
+	# Get projectile sprite and size from attacker data
+	var projectile_sprite_path = attacker.get("projectile_sprite", "res://assets/Effects/laser_light/s_laser_light_001.png")
+	var projectile_pixel_size = attacker.get("projectile_size", 6)
+	var projectile_texture: Texture2D = load(projectile_sprite_path)
+
 	# Create laser sprite
 	var laser = Sprite2D.new()
-	laser.texture = CombatConstants.LaserTexture
+	laser.texture = projectile_texture
 	laser.position = start_pos
 	laser.rotation = angle
 	laser.z_index = 1
 	add_child(laser)
 
-	# Scale laser
-	var laser_height = CombatConstants.LaserTexture.get_height()
-	var scale_y = 6.0 / laser_height
+	# Scale laser to desired pixel height
+	var laser_height = projectile_texture.get_height()
+	var scale_y = float(projectile_pixel_size) / laser_height
 	laser.scale = Vector2(scale_y, scale_y)
-	laser.offset = Vector2(-CombatConstants.LaserTexture.get_width() / 2, -CombatConstants.LaserTexture.get_height() / 2)
+	laser.offset = Vector2(-projectile_texture.get_width() / 2, -projectile_texture.get_height() / 2)
 
 	# Animate laser
 	var flight_duration = 0.2
@@ -3157,26 +3173,36 @@ func auto_fire_single_laser(attacker: Dictionary, target: Dictionary):
 	)
 
 func auto_on_laser_hit(laser: Sprite2D, attacker: Dictionary, target: Dictionary):
-	# Handle laser hit in auto-combat
-	laser.queue_free()
+	# Handle laser reaching target position in auto-combat
+	# If hit: destroy laser and apply damage
+	# If miss: continue traveling until off-screen
 
 	# Check if units still exist
 	if attacker.is_empty() or target.is_empty():
+		laser.queue_free()
 		return
 	if not is_instance_valid(target.get("container")):
+		laser.queue_free()
 		return
 
 	# Calculate and apply damage
 	var damage_dealt = calculate_damage(attacker, target)
+
+	# Check if attack hit or missed
 	if damage_dealt > 0:
+		# HIT - Remove the laser projectile and apply damage
+		laser.queue_free()
 		apply_damage(target, damage_dealt)
 
-	# Flash target
-	if target.has("sprite"):
-		var target_sprite = target["sprite"]
-		var flash_tween = create_tween()
-		flash_tween.tween_property(target_sprite, "modulate", Color(2.0, 2.0, 2.0, 1.0), 0.05)
-		flash_tween.tween_property(target_sprite, "modulate", Color(1.0, 1.0, 1.0, 1.0), 0.1)
+		# Flash target
+		if target.has("sprite"):
+			var target_sprite = target["sprite"]
+			var flash_tween = create_tween()
+			flash_tween.tween_property(target_sprite, "modulate", Color(2.0, 2.0, 2.0, 1.0), 0.05)
+			flash_tween.tween_property(target_sprite, "modulate", Color(1.0, 1.0, 1.0, 1.0), 0.1)
+	else:
+		# MISS - Continue traveling in same direction until off-screen
+		continue_laser_off_screen(laser)
 
 
 # Energy system functions
