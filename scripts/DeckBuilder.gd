@@ -15,8 +15,8 @@ var card_database: Dictionary = {}
 var previous_scene: String = ""
 
 func _ready():
-	# Load card database
-	load_cards_from_csv("res://card_database/any_type_4_card_database.csv")
+	# Load card database from DataManager
+	load_cards_from_datamanager()
 
 	# Connect back button
 	back_button.pressed.connect(_on_back_button_pressed)
@@ -31,63 +31,37 @@ func _ready():
 	# Load and display the deck
 	load_deck()
 
-func load_cards_from_csv(file_path: String) -> bool:
-	var file = FileAccess.open(file_path, FileAccess.READ)
-	if file == null:
-		print("Failed to open CSV file: ", file_path)
-		return false
+func load_cards_from_datamanager():
+	"""Load all cards from DataManager into card_database"""
+	card_database.clear()
 
-	# Read header line
-	var header = file.get_csv_line()
-	if header.size() < 4:
-		print("Invalid CSV format - expected at least 4 columns")
-		file.close()
-		return false
+	for card_data in DataManager.get_all_cards():
+		# Use card type as key for easy lookup
+		var card_type = card_data.get("type", "")
+		if card_type != "":
+			card_database[card_type] = card_data
 
-	# Parse each line
-	while not file.eof_reached():
-		var line = file.get_csv_line()
-		if line.size() >= 4 and line[0] != "":
-			var card_data = {
-				"name": line[0],
-				"cost": int(line[1]),
-				"description": line[2],
-				"type": line[3],
-				"armor": int(line[4]) if line.size() > 4 else 0,
-				"shield": int(line[5]) if line.size() > 5 else 0
-			}
-			# Use lowercase type as key for easy lookup
-			card_database[line[3]] = card_data
-
-	file.close()
-	print("Loaded ", card_database.size(), " cards from CSV")
-	return true
+	print("DeckBuilder: Loaded ", card_database.size(), " cards from DataManager")
 
 func load_deck():
-	# Load starting deck from CSV to get the default order
+	"""Load starting deck from DataManager"""
 	var deck_cards: Array[Dictionary] = []
 
-	var file = FileAccess.open("res://card_database/starting_deck.csv", FileAccess.READ)
-	if file == null:
-		print("Failed to open starting_deck.csv")
-		return
+	# Get starting deck card IDs from DataManager
+	var deck_card_ids = DataManager.load_starting_deck()
 
-	# Read header line
-	var header = file.get_csv_line()
-
-	# Read each card name and add to deck
-	while not file.eof_reached():
-		var line = file.get_csv_line()
-		if line.size() > 0 and line[0] != "":
-			var card_name = line[0]
-			# Convert card name to lowercase type key
-			var card_type = card_name.to_lower().replace(" ", "_")
+	# Look up each card in the database
+	for card_id in deck_card_ids:
+		var card_data = DataManager.get_card_data(card_id)
+		if not card_data.is_empty():
+			deck_cards.append(card_data.duplicate())
+		else:
+			# Try using card_id as type key (backwards compatibility)
+			var card_type = card_id.to_lower().replace(" ", "_")
 			if card_database.has(card_type):
 				deck_cards.append(card_database[card_type].duplicate())
 			else:
-				print("Warning: Card type not found in database: ", card_type)
-
-	file.close()
+				print("DeckBuilder: Warning - Card not found: ", card_id)
 
 	# Display the deck
 	display_deck(deck_cards)

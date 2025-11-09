@@ -145,18 +145,9 @@ func _process(delta):
 	handle_edge_scrolling(delta)
 
 func load_star_names():
-	star_names.clear()
-	var file = FileAccess.open("res://card_database/star_names.csv", FileAccess.READ)
-	if file:
-		var _header = file.get_csv_line()  # Skip header
-		while not file.eof_reached():
-			var line = file.get_csv_line()
-			if line.size() > 0 and line[0] != "":
-				star_names.append(line[0])
-		file.close()
-		print("Loaded ", star_names.size(), " star names")
-	else:
-		print("Failed to load star names CSV")
+	# Load star names from DataManager
+	star_names = DataManager.get_all_star_names()
+	print("StarMap: Loaded ", star_names.size(), " star names from DataManager")
 
 func generate_starfield():
 	var viewport_size = get_viewport_rect().size
