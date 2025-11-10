@@ -241,6 +241,9 @@ func _ready():
 
 	# Setup turn progression button
 	setup_turn_progression_button()
+	
+	# Setup card system
+	setup_card_system()
 
 	print("Combat_2 initialized with tactical view")
 
@@ -1690,6 +1693,8 @@ func deploy_ship_to_lane(ship_type: String, lane_index: int):
 	var ship_data = {
 		"object_type": "ship",  # Distinguish from turrets
 		"type": ship_type,
+		"faction": "player",  # Add faction field for targeting system
+		"is_enemy": false,  # Boolean for quick checks
 		"container": ship_container,
 		"sprite": sprite,
 		"size": ship_size,
@@ -1788,10 +1793,11 @@ func deploy_enemy_to_lane(enemy_type: String, lane_index: int):
 	var enemy_data = {
 		"object_type": "ship",  # Enemies are also ships (not turrets)
 		"type": enemy_type,
+		"faction": "enemy",  # Add faction field for targeting system
+		"is_enemy": true,  # Boolean for quick checks
 		"container": enemy_container,
 		"sprite": sprite,
 		"size": enemy_size,
-		"is_enemy": true,
 		"position": Vector2(x_pos, target_y),
 		"original_position": Vector2(x_pos, target_y),
 		"idle_paused": false,  # Paused during lane combat
@@ -2161,6 +2167,66 @@ func setup_turn_progression_button():
 
 	# Add to UI layer so it's not affected by camera zoom
 	ui_layer.add_child(turn_progression_button)
+
+# ============================================================================
+# CARD SYSTEM
+# ============================================================================
+
+var draw_card_button: Button = null
+
+func setup_card_system():
+	"""Initialize the card system"""
+	print("Combat_2: Setting up card system...")
+	
+	# Setup hand UI
+	CardHandManager.setup_hand_ui(self)
+	
+	# Initialize and shuffle deck
+	CardHandManager.initialize_deck()
+	
+	# Set combat scene reference
+	CardHandManager.set_combat_scene(self)
+	
+	# Create draw card button
+	draw_card_button = Button.new()
+	draw_card_button.name = "DrawCardButton"
+	draw_card_button.text = "Draw Card"
+	draw_card_button.position = Vector2(950, 20)  # Top right
+	draw_card_button.size = Vector2(180, 50)
+	draw_card_button.add_theme_font_size_override("font_size", 18)
+	draw_card_button.add_to_group("ui")
+	draw_card_button.visible = false  # Hidden until precombat phase
+	draw_card_button.pressed.connect(_on_draw_card_pressed)
+	ui_layer.add_child(draw_card_button)
+	
+	# Hide hand initially
+	CardHandManager.set_hand_visible(false)
+	
+	print("Combat_2: Card system setup complete")
+
+func _on_draw_card_pressed():
+	"""Handle draw card button press"""
+	var success = CardHandManager.draw_card()
+	if not success:
+		print("Combat_2: Cannot draw card")
+		# Could add UI feedback here
+
+func update_card_system_visibility():
+	"""Update card UI visibility based on combat phase"""
+	# Hand and draw button visible when zoomed into any lane (precombat or combat)
+	# Cards are only PLAYABLE during precombat phase
+	var in_lane_view = is_zoomed  # Show cards whenever in lane view
+	var in_precombat = is_zoomed and combat_paused and waiting_for_combat_start  # Can only play cards in precombat
+	
+	if draw_card_button:
+		draw_card_button.visible = in_lane_view  # Can draw during precombat OR combat
+	
+	CardHandManager.set_hand_visible(in_lane_view)  # Show hand in both phases
+	
+	# Update CardHandManager's current lane reference and playability
+	if is_zoomed:
+		CardHandManager.set_combat_scene(self, zoomed_lane_index)
+		CardHandManager.set_cards_playable(in_precombat)  # Only playable during precombat
 
 func _on_auto_deploy_pressed():
 	# Auto-deploy player ships and enemies
@@ -2834,6 +2900,9 @@ func start_turn_mode():
 	# Hide return button in turn mode (no manual returns allowed)
 	if return_button:
 		return_button.visible = false
+	
+	# Card UI hidden in tactical phase, shown in precombat
+	update_card_system_visibility()
 
 	print("Turn mode started - Tactical phase")
 
@@ -2891,6 +2960,9 @@ func proceed_to_next_lane():
 		waiting_for_combat_start = true
 		if turn_progression_button:
 			turn_progression_button.text = "Start Combat"
+		
+		# Update card system visibility (show hand and draw button)
+		update_card_system_visibility()
 
 func start_combat_phase():
 	# Start combat in the current zoomed lane
@@ -2911,6 +2983,9 @@ func start_combat_phase():
 	# Unpause combat
 	combat_paused = false
 	print("Combat UNPAUSED - lane active")
+	
+	# Hide card system during combat
+	update_card_system_visibility()
 
 	# Start lane combat (this will assign targets and begin attacks)
 	start_lane_combat(zoomed_lane_index)
@@ -3987,6 +4062,11 @@ func gain_energy(unit: Dictionary):
 func cast_ability(unit: Dictionary):
 	# Cast unit's ability when energy is full
 	if unit.is_empty():
+		return
+	
+	# Don't cast abilities while combat is paused (precombat phase)
+	if combat_paused:
+		print("Ability cast blocked - combat is paused")
 		return
 
 	var ability_name = unit.get("ability_name", "")

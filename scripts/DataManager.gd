@@ -6,22 +6,19 @@ extends Node
 
 # CSV file paths
 const SHIP_DATABASE_PATH = "res://card_database/ship_database.csv"
-const CARD_DATABASE_PATH = "res://card_database/any_type_4_card_database.csv"
 const STARTING_DECK_PATH = "res://card_database/starting_deck.csv"
 const STAR_NAMES_PATH = "res://card_database/star_names.csv"
-const ENEMIES_PATH = "res://card_database/enemies.csv"
+const CARD_DATABASE_PATH = "res://card_database/card_database.csv"
 
 # Cached data
 var ships: Dictionary = {}  # ship_id -> ship_data
-var cards: Dictionary = {}  # card_id -> card_data
 var star_names: Array[String] = []
-var enemies: Dictionary = {}  # enemy_id -> enemy_data
+var cards: Dictionary = {}  # card_name -> card_data
 
 # Loading status flags
 var ships_loaded: bool = false
-var cards_loaded: bool = false
 var star_names_loaded: bool = false
-var enemies_loaded: bool = false
+var cards_loaded: bool = false
 
 func _ready():
 	print("DataManager: Initializing...")
@@ -30,9 +27,8 @@ func _ready():
 func load_all_databases():
 	"""Load all CSV databases on startup"""
 	load_ship_database()
-	load_card_database()
 	load_star_names()
-	# Note: enemies.csv is deprecated, ships are in ship_database.csv
+	load_card_database()
 	print("DataManager: All databases loaded")
 
 # ============================================================================
@@ -174,38 +170,38 @@ func get_enabled_ships() -> Array[Dictionary]:
 # ============================================================================
 
 func load_card_database() -> bool:
-	"""Load card data from any_type_4_card_database.csv"""
+	"""Load card data from card_database.csv"""
 	print("DataManager: Loading card database from: ", CARD_DATABASE_PATH)
-
+	
 	var file = FileAccess.open(CARD_DATABASE_PATH, FileAccess.READ)
 	if file == null:
 		push_error("DataManager: Could not open card database: " + CARD_DATABASE_PATH)
 		return false
-
+	
 	# Read header
 	var header = file.get_csv_line()
 	if header.is_empty():
 		push_error("DataManager: Card database is empty")
 		file.close()
 		return false
-
+	
 	# Parse data lines
 	var card_count = 0
 	while not file.eof_reached():
 		var line = file.get_csv_line()
-
+		
 		# Skip empty lines
 		if line.is_empty() or (line.size() == 1 and line[0] == ""):
 			continue
-
+		
 		# Parse card data
 		var card_data = parse_card_data(header, line)
 		if not card_data.is_empty():
-			var card_id = card_data.get("card_id", "")
-			if card_id != "":
-				cards[card_id] = card_data
+			var card_name = card_data.get("card_name", "")
+			if card_name != "":
+				cards[card_name] = card_data
 				card_count += 1
-
+	
 	file.close()
 	cards_loaded = true
 	print("DataManager: Loaded ", card_count, " cards")
@@ -214,68 +210,58 @@ func load_card_database() -> bool:
 func parse_card_data(header: Array, line: Array) -> Dictionary:
 	"""Parse a single card CSV line into a dictionary"""
 	var card_data = {}
-
+	
 	# Map CSV columns to dictionary keys
 	for i in range(min(header.size(), line.size())):
 		var column_name = header[i]
 		var value = line[i]
-
-		# Store all card fields as-is (type conversion can be done later if needed)
+		
+		# All card fields are strings
 		card_data[column_name] = value
-
+	
 	return card_data
 
-func get_card_data(card_id: String) -> Dictionary:
-	"""Get card data by card_id"""
+func get_card_data(card_name: String) -> Dictionary:
+	"""Get card data by card_name"""
 	if not cards_loaded:
 		push_warning("DataManager: Card database not loaded yet")
 		return {}
-
-	if not cards.has(card_id):
-		push_warning("DataManager: Card not found: " + card_id)
+	
+	if not cards.has(card_name):
+		push_warning("DataManager: Card not found: " + card_name)
 		return {}
-
-	return cards[card_id]
-
-func get_cards_by_type(card_type: String) -> Array[Dictionary]:
-	"""Get all cards of a specific type"""
-	var type_cards: Array[Dictionary] = []
-
-	for card_id in cards.keys():
-		var card_data = cards[card_id]
-		if card_data.get("type", "") == card_type:
-			type_cards.append(card_data)
-
-	return type_cards
+	
+	return cards[card_name]
 
 func get_all_cards() -> Array[Dictionary]:
 	"""Get all card data"""
 	var all_cards: Array[Dictionary] = []
-	for card_id in cards.keys():
-		all_cards.append(cards[card_id])
+	for card_name in cards.keys():
+		all_cards.append(cards[card_name])
 	return all_cards
 
 func load_starting_deck() -> Array[String]:
-	"""Load starting deck card IDs from starting_deck.csv"""
-	var deck_card_ids: Array[String] = []
-
+	"""Load starting deck from starting_deck.csv and return card names"""
+	print("DataManager: Loading starting deck from: ", STARTING_DECK_PATH)
+	
+	var deck_card_names: Array[String] = []
 	var file = FileAccess.open(STARTING_DECK_PATH, FileAccess.READ)
 	if file == null:
 		push_error("DataManager: Could not open starting deck: " + STARTING_DECK_PATH)
-		return deck_card_ids
-
-	# Read header
+		return deck_card_names
+	
+	# Skip header
 	var _header = file.get_csv_line()
-
-	# Read card IDs
+	
+	# Read card names
 	while not file.eof_reached():
 		var line = file.get_csv_line()
 		if line.size() > 0 and line[0] != "":
-			deck_card_ids.append(line[0])
-
+			deck_card_names.append(line[0])
+	
 	file.close()
-	print("DataManager: Loaded starting deck with ", deck_card_ids.size(), " cards")
-	return deck_card_ids
+	print("DataManager: Loaded starting deck with ", deck_card_names.size(), " cards")
+	return deck_card_names
 
 # ============================================================================
 # STAR NAMES DATABASE
@@ -324,15 +310,15 @@ func reload_all_databases():
 	"""Reload all CSV databases (useful for development)"""
 	print("DataManager: Reloading all databases...")
 	ships.clear()
-	cards.clear()
 	star_names.clear()
+	cards.clear()
 
 	ships_loaded = false
-	cards_loaded = false
 	star_names_loaded = false
+	cards_loaded = false
 
 	load_all_databases()
 
 func is_all_data_loaded() -> bool:
 	"""Check if all databases are loaded"""
-	return ships_loaded and cards_loaded and star_names_loaded
+	return ships_loaded and star_names_loaded and cards_loaded

@@ -75,8 +75,7 @@ TODO: The  UI has two additionlal resources, needs a proper window, and also nee
 
 ### 1.2 Data Management System
 - [x] Create CSV structure for:
-  - `any_type_4_card_database.csv` - Card definitions
-  - `starting_deck.csv` - Starting deck composition
+  - `starting_deck.csv` - Starting deck composition (deprecated with card system)
   - `enemies.csv` - Enemy types and stats (deprecated, see ship_database.csv)
   - `star_names.csv` - Procedural star name generation
   - `ship_database.csv` - Ship and enemy data (all stats, sprites, properties) ✓
@@ -465,10 +464,57 @@ TODO: The  UI has two additionlal resources, needs a proper window, and also nee
   - Only attack enemies in active lane
   - Return to multi-lane targeting after combat
 
-### 2.20 NOT YET IMPLEMENTED
+### 2.20 Card System ⚠️ PARTIALLY IMPLEMENTED
+- [x] Card database and data loading
+  - card_database.csv with 4 cards (Strike, Shield, Energy Alpha, Turret Blast)
+  - starting_deck.csv with starting deck composition
+  - DataManager loads card data on startup
+- [x] Card visual system
+  - Card.tscn with NinePatchRect frame
+  - Card artwork from sprite_path in CSV
+  - Card name, description display
+  - Hand UI at bottom of screen (CanvasLayer z:500)
+- [x] Card hand management
+  - CardHandManager singleton for deck/hand/discard
+  - Draw pile, hand, discard pile tracking
+  - Shuffle deck functionality
+  - Draw card button (visible in lane view)
+- [x] Card drag-and-drop
+  - Drag cards to play (offset below cursor)
+  - Semi-transparent during drag
+  - Return to hand on invalid drop
+  - Play animation to target
+- [x] Card targeting system
+  - Target detection by faction (friendly_ship, friendly_turret, enemy_ship)
+  - Red glow on valid targets (300px detection radius)
+  - Grid-based and distance-based targeting
+  - Target validation before card play
+- [x] Card effects implementation
+  - CardEffects.gd with static effect functions
+  - Strike: +50% attack speed to target ship
+  - Shield: +30 shields to target ship
+  - Energy Alpha: +100 energy to target ship
+  - Turret Blast: Activate turret ability
+  - Visual effect notifications (floating text)
+- [x] Card system integration with combat
+  - Cards visible in both precombat and combat phases
+  - Draw cards anytime during lane view
+  - Cards only playable during precombat phase
+  - Cards removed from hand after successful play
+  - Cards persist across lanes
+- [x] Ability casting on energy max
+  - Ships cast abilities when energy reaches max
+  - Ability casting blocked during combat_paused
+  - Energy Alpha can trigger instant ability cast in combat
+- [ ] KNOWN ISSUES:
+  - Cards cannot be interacted with in second lane (targeting/dragging broken)
+  - Need more card types and effects
+  - No card cost system yet
+  - No deck building between battles
+
+### 2.21 NOT YET IMPLEMENTED
 The following systems from the original plan are not yet implemented:
 
-- [ ] Card system (hand, draw, discard, card play mechanics)
 - [ ] Enemy wave system and AI movement
 - [ ] Pilot system
 - [ ] Powerup system
@@ -477,7 +523,7 @@ The following systems from the original plan are not yet implemented:
 - [ ] Rewards system
 - [ ] VFX and particle effects beyond basic hit flash and off-screen projectiles
 - [ ] Combo system
-- [ ] Actual ability effect implementations (function stubs exist)
+- [ ] Expanded card system (more cards, costs, deck building)
 
 ---
 
@@ -644,6 +690,7 @@ StarMap → ...
 23. **Attack Speed Fix** - Corrected turret attack timing to match ship formula
 24. **Grid-Based Movement** - Drag-and-drop ship repositioning with valid move detection
 25. **Turret System** - 5 turrets with lane-specific targeting and combat integration
+26. **Card System (Partial)** - Hand UI, draw mechanics, drag-and-drop targeting, card effects (Strike, Shield, Energy Alpha, Turret Blast)
 
 ### Immediate Next Steps - ABILITY SYSTEM
 The combat mechanics are solid. Next focus is implementing ship abilities:

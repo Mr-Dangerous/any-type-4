@@ -46,8 +46,9 @@ any-type-4/
 │       ├── corvette.svg
 │       ├── interceptor.svg
 │       └── slime.svg
-├── card_database/        # Card definitions
-│   └── any_type_4_card_database.csv
+├── card_database/        # CSV data files
+│   ├── ship_database.csv
+│   └── star_names.csv
 ├── scenes/              # Godot scene files
 │   ├── Combat.tscn      # Main combat scene
 │   ├── Card.tscn        # Card UI component
@@ -86,22 +87,14 @@ any-type-4/
 - Attack card removal when ships are destroyed
 - Turn-based gameplay with enemy AI
 
-## Card Database
+## Ship Database
 
-Cards are defined in `card_database/any_type_4_card_database.csv`:
-
-| Card | Cost | Type | Damage/Effect |
-|------|------|------|---------------|
-| Scout | 1 | Ship | 5 armor, 5 shield |
-| Corvette | 2 | Ship | 20 armor, 15 shield |
-| Interceptor | 0 | Ship | 5 armor, 5 shield |
-| Fighter | 1 | Ship | 5 armor, 10 shield |
-| Scout Attack | 0 | Attack | 3 damage |
-| Corvette Attack | 2 | Attack | 5 damage |
-| Interceptor Attack | 0 | Attack | 4 damage |
-| Fighter Attack | 1 | Attack | 7 damage |
-| Torpedo | 1 | Attack | 10 damage |
-| Shields Up | 1 | Buff | +1 shield to all ships |
+Ships are defined in `card_database/ship_database.csv` with comprehensive stats including:
+- Combat stats (armor, shield, damage, accuracy, evasion)
+- Movement and deployment properties
+- Projectile types and sizes
+- Special abilities and energy requirements
+- Faction (player/enemy) and size class designations
 
 ## Development
 
@@ -115,9 +108,9 @@ Cards are defined in `card_database/any_type_4_card_database.csv`:
 3. Deploy ships and use attack cards to defeat the enemy
 
 ### Key Files
-- `scripts/Combat.gd`: Main game logic (combat system, card management, animations)
-- `scripts/Card.gd`: Card component with drag-drop and visual effects
-- `card_database/any_type_4_card_database.csv`: Card definitions
+- `scripts/Combat_2.gd`: Main combat system (lane-based tactical combat)
+- `scripts/DataManager.gd`: Centralized CSV data loading singleton
+- `card_database/ship_database.csv`: Ship and enemy definitions
 
 ## Game Flow
 

@@ -1,6 +1,7 @@
-[gd_scene load_steps=2 format=3 uid="uid://cftiflsfwhu7d"]
+[gd_scene load_steps=3 format=3 uid="uid://cftiflsfwhu7d"]
 
 [ext_resource type="Script" path="res://scripts/Card.gd" id="1_1a1a1"]
+[ext_resource type="Texture2D" uid="uid://bg2uyduhajlc7" path="res://assets/UI/s_window_frame/s_window_frame.png" id="2_frame"]
 
 [node name="Card" type="Control"]
 custom_minimum_size = Vector2(120, 180)
@@ -10,16 +11,22 @@ offset_right = 120.0
 offset_bottom = 180.0
 script = ExtResource("1_1a1a1")
 
-[node name="Panel" type="Panel" parent="."]
+[node name="Background" type="NinePatchRect" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-mouse_filter = 2
+texture = ExtResource("2_frame")
+patch_margin_left = 8
+patch_margin_top = 8
+patch_margin_right = 8
+patch_margin_bottom = 8
+axis_stretch_horizontal = 1
+axis_stretch_vertical = 1
 
-[node name="MarginContainer" type="MarginContainer" parent="Panel"]
+[node name="Content" type="MarginContainer" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -30,42 +37,50 @@ theme_override_constants/margin_left = 8
 theme_override_constants/margin_top = 8
 theme_override_constants/margin_right = 8
 theme_override_constants/margin_bottom = 8
+mouse_filter = 2
 
-[node name="VBoxContainer" type="VBoxContainer" parent="Panel/MarginContainer"]
+[node name="VBox" type="VBoxContainer" parent="Content"]
 layout_mode = 2
-theme_override_constants/separation = 4
+theme_override_constants/separation = 0
+mouse_filter = 2
 
-[node name="TopBar" type="HBoxContainer" parent="Panel/MarginContainer/VBoxContainer"]
+[node name="NameLabel" type="Label" parent="Content/VBox"]
+custom_minimum_size = Vector2(0, 24)
 layout_mode = 2
-
-[node name="CostLabel" type="Label" parent="Panel/MarginContainer/VBoxContainer/TopBar"]
-custom_minimum_size = Vector2(30, 0)
-layout_mode = 2
-theme_override_colors/font_color = Color(0.2, 0.6, 1, 1)
-theme_override_font_sizes/font_size = 24
-text = "0"
-horizontal_alignment = 1
-
-[node name="NameLabel" type="Label" parent="Panel/MarginContainer/VBoxContainer"]
-custom_minimum_size = Vector2(0, 20)
-layout_mode = 2
-theme_override_font_sizes/font_size = 16
+theme_override_font_sizes/font_size = 14
 text = "Card Name"
 horizontal_alignment = 1
+vertical_alignment = 1
 clip_text = true
 
-[node name="ArtworkArea" type="ColorRect" parent="Panel/MarginContainer/VBoxContainer"]
-custom_minimum_size = Vector2(100, 60)
+[node name="ArtworkContainer" type="Control" parent="Content/VBox"]
+custom_minimum_size = Vector2(0, 72)
 layout_mode = 2
+size_flags_vertical = 0
 mouse_filter = 2
-color = Color(0.2, 0.2, 0.25, 1)
 
-[node name="Separator" type="HSeparator" parent="Panel/MarginContainer/VBoxContainer"]
-layout_mode = 2
+[node name="ArtworkTexture" type="TextureRect" parent="Content/VBox/ArtworkContainer"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+stretch_mode = 5
 
-[node name="DescriptionLabel" type="Label" parent="Panel/MarginContainer/VBoxContainer"]
+[node name="DescriptionContainer" type="Control" parent="Content/VBox"]
 layout_mode = 2
 size_flags_vertical = 3
-theme_override_font_sizes/font_size = 12
+mouse_filter = 2
+
+[node name="DescriptionLabel" type="Label" parent="Content/VBox/DescriptionContainer"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_font_sizes/font_size = 11
 text = "Card description goes here."
 autowrap_mode = 3
