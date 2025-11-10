@@ -45,7 +45,7 @@ static func execute_Strike(target, _combat_scene: Node) -> bool:
 	return true
 
 static func execute_Shield(target, combat_scene: Node) -> bool:
-	"""Target ship gains 30 shields"""
+	"""Target ship gains 30 shields (excess becomes overshield at 1/3 rate)"""
 	if not target is Dictionary or not target.has("container"):
 		return false
 	
@@ -53,18 +53,33 @@ static func execute_Shield(target, combat_scene: Node) -> bool:
 	if ship_type == "":
 		return false
 	
-	# Add 30 shields
+	# Calculate shield application with overshield mechanic
 	var current_shield = target.get("current_shield", 0)
-	var new_shield = current_shield + 30
-	target["current_shield"] = new_shield
+	var max_shield = target.get("stats", {}).get("shield", 100)
+	var shield_to_add = 30
 	
-	print("CardEffects: Shield - Added 30 shields to ", ship_type, " (now ", new_shield, ")")
+	var shield_space = max_shield - current_shield
+	
+	if shield_space >= shield_to_add:
+		# All shields fit normally
+		target["current_shield"] = current_shield + shield_to_add
+		print("CardEffects: Shield - Added ", shield_to_add, " shields to ", ship_type, " (now ", target["current_shield"], ")")
+		show_effect_notification(target, "+30 SHIELD", Color.CYAN)
+	else:
+		# Fill normal shields, convert overflow to overshield at 1/3 rate (min 1)
+		var normal_shield_gain = shield_space
+		var overflow = shield_to_add - normal_shield_gain
+		var overshield_gain = max(1, int(overflow / 3.0))
+		
+		target["current_shield"] = max_shield
+		var current_overshield = target.get("current_overshield", 0)
+		target["current_overshield"] = current_overshield + overshield_gain
+		
+		print("CardEffects: Shield - Added ", normal_shield_gain, " shields + ", overshield_gain, " overshield to ", ship_type)
+		show_effect_notification(target, "+%d SHIELD\n+%d OVERSHIELD" % [normal_shield_gain, overshield_gain], Color.GOLD)
 	
 	# Update UI if exists
 	update_ship_ui(target, combat_scene)
-	
-	# Show notification
-	show_effect_notification(target, "+30 SHIELD", Color.CYAN)
 	
 	return true
 

@@ -242,6 +242,9 @@ func _ready():
 	# Setup turn progression button
 	setup_turn_progression_button()
 	
+	# Setup ship tooltip
+	setup_ship_tooltip()
+	
 	# Setup card system
 	setup_card_system()
 
@@ -1716,6 +1719,7 @@ func deploy_ship_to_lane(ship_type: String, lane_index: int):
 		"stats": db_ship_data["stats"].duplicate(),
 		"current_armor": db_ship_data["stats"]["armor"],
 		"current_shield": db_ship_data["stats"]["shield"],
+		"current_overshield": 0,  # Temporary shields, dissipates after lane 3
 		"current_energy": db_ship_data["stats"]["starting_energy"],
 
 		# Projectile data
@@ -1739,6 +1743,9 @@ func deploy_ship_to_lane(ship_type: String, lane_index: int):
 
 	# Initialize energy bar
 	update_energy_bar(ship_data)
+	
+	# Add hover detection for tooltip
+	add_ship_hover_detection(ship_container, ship_data)
 
 	# Start idle behavior
 	start_ship_idle_behavior(ship_data)
@@ -1815,6 +1822,7 @@ func deploy_enemy_to_lane(enemy_type: String, lane_index: int):
 		"stats": db_enemy_data["stats"].duplicate(),
 		"current_armor": db_enemy_data["stats"]["armor"],
 		"current_shield": db_enemy_data["stats"]["shield"],
+		"current_overshield": 0,  # Temporary shields, dissipates after lane 3
 		"current_energy": db_enemy_data["stats"]["starting_energy"],
 
 		# Projectile data
@@ -1838,6 +1846,9 @@ func deploy_enemy_to_lane(enemy_type: String, lane_index: int):
 
 	# Initialize energy bar
 	update_energy_bar(enemy_data)
+	
+	# Add hover detection for tooltip
+	add_ship_hover_detection(enemy_container, enemy_data)
 
 	print("Enemy deployed successfully at x=", x_pos, " y=", target_y, " with size=", enemy_size, " | Stats: Armor=", db_enemy_data["stats"]["armor"], " Shield=", db_enemy_data["stats"]["shield"], " AttackSpeed=", db_enemy_data["stats"]["attack_speed"])
 
@@ -2173,6 +2184,144 @@ func setup_turn_progression_button():
 # ============================================================================
 
 var draw_card_button: Button = null
+
+# Ship tooltip UI
+var ship_tooltip: Panel = null
+var ship_tooltip_label: Label = null
+var tooltip_tween: Tween = null
+var current_tooltip_ship: Dictionary = {}
+
+func setup_ship_tooltip():
+	"""Create the ship tooltip panel"""
+	# Create tooltip panel
+	ship_tooltip = Panel.new()
+	ship_tooltip.name = "ShipTooltip"
+	ship_tooltip.visible = false
+	ship_tooltip.z_index = 1000
+	ship_tooltip.mouse_filter = Control.MOUSE_FILTER_IGNORE  # Don't block mouse events
+	
+	# Grey background
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.2, 0.2, 0.2, 0.95)
+	style.border_width_left = 2
+	style.border_width_right = 2
+	style.border_width_top = 2
+	style.border_width_bottom = 2
+	style.border_color = Color(0.4, 0.4, 0.4, 1.0)
+	style.corner_radius_top_left = 4
+	style.corner_radius_top_right = 4
+	style.corner_radius_bottom_left = 4
+	style.corner_radius_bottom_right = 4
+	ship_tooltip.add_theme_stylebox_override("panel", style)
+	
+	# Create label for stats
+	ship_tooltip_label = Label.new()
+	ship_tooltip_label.name = "StatsLabel"
+	ship_tooltip_label.add_theme_font_size_override("font_size", 11)
+	ship_tooltip_label.add_theme_color_override("font_color", Color.WHITE)
+	ship_tooltip_label.add_theme_constant_override("line_spacing", 2)
+	ship_tooltip_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	ship_tooltip.add_child(ship_tooltip_label)
+	
+	# Add to UI layer so it's not affected by camera
+	ui_layer.add_child(ship_tooltip)
+	
+	print("Combat_2: Ship tooltip created")
+
+func add_ship_hover_detection(ship_container: Control, ship_data: Dictionary):
+	"""Add hover detection to a ship for tooltip display"""
+	# Make the container detect mouse events
+	ship_container.mouse_filter = Control.MOUSE_FILTER_STOP
+	
+	# Connect mouse enter/exit signals
+	ship_container.mouse_entered.connect(_on_ship_hover_start.bind(ship_data))
+	ship_container.mouse_exited.connect(_on_ship_hover_end.bind(ship_data))
+
+func _on_ship_hover_start(ship_data: Dictionary):
+	"""Show tooltip when hovering over ship"""
+	if ship_data.is_empty():
+		return
+	
+	current_tooltip_ship = ship_data
+	show_ship_tooltip(ship_data)
+
+func _on_ship_hover_end(ship_data: Dictionary):
+	"""Hide tooltip when leaving ship"""
+	if current_tooltip_ship == ship_data:
+		hide_ship_tooltip()
+		current_tooltip_ship = {}
+
+func show_ship_tooltip(ship_data: Dictionary):
+	"""Display tooltip with ship stats"""
+	if not ship_tooltip or not ship_tooltip_label:
+		return
+	
+	# Build stats text
+	var stats_text = ""
+	stats_text += "[b]%s[/b]\n" % ship_data.get("type", "Unknown").capitalize()
+	stats_text += "━━━━━━━━━━━━━━\n"
+	
+	# Current health
+	stats_text += "Shield: %d" % ship_data.get("current_shield", 0)
+	if ship_data.get("current_overshield", 0) > 0:
+		stats_text += " (+%d)" % ship_data.get("current_overshield", 0)
+	stats_text += " / %d\n" % ship_data.get("stats", {}).get("shield", 0)
+	
+	stats_text += "Armor: %d / %d\n" % [ship_data.get("current_armor", 0), ship_data.get("stats", {}).get("armor", 0)]
+	stats_text += "Energy: %d / %d\n" % [ship_data.get("current_energy", 0), ship_data.get("stats", {}).get("energy", 0)]
+	stats_text += "\n"
+	
+	# Combat stats
+	var stats = ship_data.get("stats", {})
+	stats_text += "Damage: %d\n" % stats.get("damage", 0)
+	stats_text += "Attack Speed: %.1f\n" % stats.get("attack_speed", 0)
+	stats_text += "Num Attacks: %d\n" % stats.get("num_attacks", 1)
+	stats_text += "Accuracy: %d%%\n" % stats.get("accuracy", 0)
+	stats_text += "Evasion: %d%%\n" % stats.get("evasion", 0)
+	stats_text += "Reinforced: %d\n" % stats.get("reinforced_armor", 0)
+	
+	ship_tooltip_label.text = stats_text
+	
+	# Size tooltip to fit text
+	await get_tree().process_frame  # Wait for label to calculate size
+	var label_size = ship_tooltip_label.get_combined_minimum_size()
+	ship_tooltip.custom_minimum_size = label_size + Vector2(20, 20)  # Padding
+	ship_tooltip_label.position = Vector2(10, 10)
+	
+	# Position near mouse
+	var mouse_pos = get_viewport().get_mouse_position()
+	ship_tooltip.position = mouse_pos + Vector2(20, 20)
+	
+	# Clamp to screen
+	var viewport_size = get_viewport_rect().size
+	if ship_tooltip.position.x + ship_tooltip.size.x > viewport_size.x:
+		ship_tooltip.position.x = mouse_pos.x - ship_tooltip.size.x - 20
+	if ship_tooltip.position.y + ship_tooltip.size.y > viewport_size.y:
+		ship_tooltip.position.y = mouse_pos.y - ship_tooltip.size.y - 20
+	
+	# Pop-in animation
+	ship_tooltip.scale = Vector2(0.5, 0.5)
+	ship_tooltip.modulate.a = 0.0
+	ship_tooltip.visible = true
+	
+	if tooltip_tween:
+		tooltip_tween.kill()
+	tooltip_tween = create_tween()
+	tooltip_tween.set_parallel(true)
+	tooltip_tween.set_ease(Tween.EASE_OUT)
+	tooltip_tween.set_trans(Tween.TRANS_BACK)
+	tooltip_tween.tween_property(ship_tooltip, "scale", Vector2.ONE, 0.2)
+	tooltip_tween.tween_property(ship_tooltip, "modulate:a", 1.0, 0.15)
+
+func hide_ship_tooltip():
+	"""Hide the ship tooltip"""
+	if not ship_tooltip:
+		return
+	
+	if tooltip_tween:
+		tooltip_tween.kill()
+	
+	ship_tooltip.visible = false
 
 func setup_card_system():
 	"""Initialize the card system"""
@@ -2692,8 +2841,15 @@ func apply_damage(target: Dictionary, damage: int) -> Dictionary:
 
 	var remaining_damage = damage
 
-	# Damage shields first
-	if target.has("current_shield") and target["current_shield"] > 0:
+	# Damage overshield first (temporary shields)
+	if target.has("current_overshield") and target["current_overshield"] > 0:
+		var overshield_damage = min(target["current_overshield"], remaining_damage)
+		target["current_overshield"] -= overshield_damage
+		remaining_damage -= overshield_damage
+		print("  Overshield damaged: -", overshield_damage, " (", target["current_overshield"], " remaining)")
+
+	# Then damage shields
+	if remaining_damage > 0 and target.has("current_shield") and target["current_shield"] > 0:
 		var shield_damage = min(target["current_shield"], remaining_damage)
 		target["current_shield"] -= shield_damage
 		remaining_damage -= shield_damage
@@ -3043,10 +3199,20 @@ func proceed_to_lane_transition(next_lane_index: int, next_phase: String):
 	if turn_progression_button:
 		turn_progression_button.text = "Start Combat"
 		turn_progression_button.visible = true
+	
+	# Update card system visibility (show hand and make cards playable)
+	update_card_system_visibility()
 
 func return_to_tactical_phase():
 	# Return to tactical view and reset turn cycle
 	print("All lanes complete - returning to tactical view")
+	
+	# Dissipate all overshields and show notifications
+	dissipate_all_overshields()
+
+	# Discard hand after lane 3 combat completes
+	print("Combat_2: Clearing hand after lane 3 completion")
+	CardHandManager.clear_hand()
 
 	# Stop combat and return to tactical
 	_on_return_to_tactical()
@@ -3057,11 +3223,67 @@ func return_to_tactical_phase():
 
 	# Reset movement flags for all units (new turn)
 	reset_ship_movement_flags()
+	
+	# Draw 3 cards at start of tactical phase
+	print("Combat_2: Drawing 3 cards for tactical phase")
+	for i in range(3):
+		var success = CardHandManager.draw_card()
+		if not success:
+			print("Combat_2: Could not draw card ", i + 1)
+			break
 
 	# Show proceed button for next turn
 	if turn_progression_button:
 		turn_progression_button.text = "Proceed to Lane 1"
 		turn_progression_button.visible = true
+
+func dissipate_all_overshields():
+	# Remove all overshields from all units and show notifications
+	# Called at the end of lane 3 combat
+	print("Combat_2: Dissipating all overshields")
+	
+	for lane in lanes:
+		for unit in lane["units"]:
+			var current_overshield = unit.get("current_overshield", 0)
+			if current_overshield > 0:
+				# Show notification
+				var notification_text = "-%d OVERSHIELD" % current_overshield
+				show_overshield_dissipation_notification(unit, notification_text)
+				
+				# Remove overshield
+				unit["current_overshield"] = 0
+				
+				# Update health bar
+				update_health_bar(unit)
+
+func show_overshield_dissipation_notification(unit: Dictionary, text: String):
+	"""Show a notification that overshield is dissipating"""
+	var container = unit.get("container")
+	if not container:
+		return
+	
+	# Create notification label
+	var notification = Label.new()
+	notification.text = text
+	notification.add_theme_font_size_override("font_size", 14)
+	notification.add_theme_color_override("font_color", Color(1.0, 0.84, 0.0, 1.0))  # Gold
+	notification.add_theme_color_override("font_outline_color", Color.BLACK)
+	notification.add_theme_constant_override("outline_size", 2)
+	notification.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	notification.z_index = 1000
+	
+	# Position above unit
+	add_child(notification)
+	notification.global_position = container.global_position + Vector2(container.size.x / 2 - 50, -40)
+	
+	# Animate and fade out
+	var tween = notification.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(notification, "position:y", notification.position.y - 40, 1.5)
+	tween.tween_property(notification, "modulate:a", 0.0, 1.5).set_delay(0.5)
+	
+	await tween.finished
+	notification.queue_free()
 
 func reset_ship_movement_flags():
 	# Reset the has_moved_this_turn flag for all units
@@ -4259,6 +4481,14 @@ func create_health_bar(ship_container: Control, ship_size: int, max_shield: int,
 	shield_bar.size = Vector2(bar_width, 4)
 	shield_bar.position = Vector2(0, 0)
 	health_bar_container.add_child(shield_bar)
+	
+	# Overshield bar (golden) - above shield bar
+	var overshield_bar = ColorRect.new()
+	overshield_bar.name = "OvershieldBar"
+	overshield_bar.color = Color(1.0, 0.84, 0.0, 1.0)  # Gold
+	overshield_bar.size = Vector2(0, 2)  # Thinner bar, starts at 0 width
+	overshield_bar.position = Vector2(0, -2)  # Above shield bar
+	health_bar_container.add_child(overshield_bar)
 
 	# Armor bar (red/orange) - middle
 	var armor_bar = ColorRect.new()
@@ -4304,6 +4534,18 @@ func update_health_bar(ship: Dictionary):
 	if shield_bar and max_shield > 0:
 		var shield_percent = float(current_shield) / float(max_shield)
 		shield_bar.size.x = bar_width * shield_percent
+	
+	# Update overshield bar width (scales based on max_shield)
+	var overshield_bar = health_bar_container.get_node_or_null("OvershieldBar")
+	if overshield_bar:
+		var current_overshield = ship.get("current_overshield", 0)
+		if current_overshield > 0 and max_shield > 0:
+			var overshield_percent = float(current_overshield) / float(max_shield)
+			overshield_bar.size.x = min(bar_width * overshield_percent, bar_width)
+			overshield_bar.visible = true
+		else:
+			overshield_bar.size.x = 0
+			overshield_bar.visible = false
 
 	# Also update energy bar
 	update_energy_bar(ship)
