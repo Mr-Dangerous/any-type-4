@@ -88,7 +88,7 @@ func parse_ship_data(header: Array, line: Array) -> Dictionary:
 
 		# Parse value based on column type
 		match column_name:
-			"ship_id", "display_name", "faction", "sprite_path", "projectile_sprite", "size_class", "description", "ability_function", "abilty", "ability_description", "type":
+			"ship_id", "display_name", "faction", "sprite_path", "projectile_sprite", "size_class", "description", "ability_function", "ability", "ability_description", "type":
 				ship_data[column_name] = value
 
 			"size", "projectile_size", "armor", "shield", "reinforced_armor", "evasion", "damage", "accuracy", "num_attacks", "amplitude", "frequency", "energy", "starting_energy", "upgrade_slots", "movement_speed":
@@ -159,6 +159,15 @@ func get_all_ships() -> Array[Dictionary]:
 	for ship_id in ships.keys():
 		all_ships.append(ships[ship_id])
 	return all_ships
+
+func get_enabled_ships() -> Array[Dictionary]:
+	"""Get all enabled ships"""
+	var enabled_ships: Array[Dictionary] = []
+	for ship_id in ships.keys():
+		var ship_data = ships[ship_id]
+		if ship_data.get("enabled", true):
+			enabled_ships.append(ship_data)
+	return enabled_ships
 
 # ============================================================================
 # CARD DATABASE

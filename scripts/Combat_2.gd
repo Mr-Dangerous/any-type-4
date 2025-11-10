@@ -2,11 +2,20 @@ extends Node2D
 
 # Tactical view combat system with 3 horizontal lanes
 
+# Manager classes
+var ship_manager: CombatShipManager = null
+var targeting_system: CombatTargetingSystem = null
+var projectile_manager: CombatProjectileManager = null
+
+# Preloaded scenes
+const DamageNumber = preload("res://scripts/DamageNumber.gd")
+
 # Constants and resources now loaded from CombatConstants autoload singleton
 # Game state
 var lanes: Array[Dictionary] = []  # Each lane can contain units
 var lane_grids: Array = []  # Grid occupancy tracking: [lane_index][row][col] -> unit or null
-var turrets: Array[Dictionary] = []  # Turret battle objects
+var turrets: Array[Dictionary] = []  # Player turret battle objects
+var enemy_turrets: Array[Dictionary] = []  # Enemy turret battle objects
 var selected_ship_type: String = ""  # Currently selected ship for deployment
 var ship_selection_panel: Panel = null
 var deploy_button: Button = null
@@ -55,10 +64,132 @@ var zoom_timer_label: Label = null
 # Debug system
 var debug_panel: Panel = null
 var debug_button: Button = null
-var player_targeting_mode: String = "alpha"  # "random" or "alpha"
-var enemy_targeting_mode: String = "alpha"   # "random" or "alpha"
+var player_targeting_mode: String = "gamma"  # "gamma" (row-based), "alpha" (multi-row), or "random"
+var enemy_targeting_mode: String = "gamma"   # "gamma" (row-based), "alpha" (multi-row), or "random"
+
+# ============================================================================
+# MANAGER INITIALIZATION
+# ============================================================================
+
+func initialize_managers():
+	"""Initialize the combat manager systems"""
+	# Create ship manager
+	ship_manager = CombatShipManager.new()
+	ship_manager.name = "ShipManager"
+	add_child(ship_manager)
+	ship_manager.initialize(self)
+
+	# Create targeting system
+	targeting_system = CombatTargetingSystem.new()
+	targeting_system.name = "TargetingSystem"
+	add_child(targeting_system)
+	targeting_system.initialize(ship_manager)
+
+	# Sync targeting modes
+	targeting_system.player_targeting_mode = player_targeting_mode
+	targeting_system.enemy_targeting_mode = enemy_targeting_mode
+
+	# Create projectile manager
+	projectile_manager = CombatProjectileManager.new()
+	projectile_manager.name = "ProjectileManager"
+	add_child(projectile_manager)
+	projectile_manager.initialize(self, ship_manager)
+
+	# Connect signals
+	ship_manager.ship_destroyed.connect(_on_ship_destroyed)
+	projectile_manager.damage_dealt.connect(_on_damage_dealt)
+
+	# Share state references between managers and main
+	# Lanes and grids are now managed by ship_manager
+	lanes = ship_manager.lanes
+	lane_grids = ship_manager.lane_grids
+	turrets = ship_manager.turrets
+	enemy_turrets = ship_manager.enemy_turrets
+
+	print("Combat_2: Manager systems initialized")
+
+func _on_ship_destroyed(ship: Dictionary):
+	"""Handle ship destruction event from ship manager"""
+	# Clear target references
+	targeting_system.clear_targets_referencing_ship(ship)
+	# Could add more cleanup here
+
+func _on_damage_dealt(attacker: Dictionary, target: Dictionary, damage_info: Dictionary):
+	"""Handle damage dealt event from projectile manager"""
+	if damage_info.get("destroyed", false):
+		# Check if destroyed object is mothership or boss
+		var object_type = target.get("object_type", "")
+
+		if object_type == "mothership":
+			_on_mothership_destroyed()
+		elif object_type == "boss":
+			_on_boss_destroyed()
+		else:
+			# Regular ship destruction
+			ship_manager.destroy_ship(target)
+
+func _on_mothership_destroyed():
+	"""Handle player mothership destruction - GAME OVER"""
+	print("========================================")
+	print("      MOTHERSHIP DESTROYED!")
+	print("           DEFEAT")
+	print("========================================")
+
+	# Pause all combat
+	combat_paused = true
+	auto_combat_active = false
+
+	# Create game over UI
+	var game_over_panel = Panel.new()
+	game_over_panel.name = "GameOverPanel"
+	game_over_panel.position = Vector2(get_viewport_rect().size.x / 2 - 200, get_viewport_rect().size.y / 2 - 100)
+	game_over_panel.custom_minimum_size = Vector2(400, 200)
+	game_over_panel.z_index = 1000
+	ui_layer.add_child(game_over_panel)
+
+	var label = Label.new()
+	label.text = "MOTHERSHIP DESTROYED\n\nDEFEAT\n\n(Close game to restart)"
+	label.position = Vector2(20, 20)
+	label.add_theme_font_size_override("font_size", 24)
+	label.add_theme_color_override("font_color", Color(1, 0.2, 0.2, 1))
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	game_over_panel.add_child(label)
+
+func _on_boss_destroyed():
+	"""Handle enemy boss destruction - VICTORY"""
+	print("========================================")
+	print("        ENEMY BOSS DESTROYED!")
+	print("            VICTORY")
+	print("========================================")
+
+	# Pause all combat
+	combat_paused = true
+	auto_combat_active = false
+
+	# Create victory UI
+	var victory_panel = Panel.new()
+	victory_panel.name = "VictoryPanel"
+	victory_panel.position = Vector2(get_viewport_rect().size.x / 2 - 200, get_viewport_rect().size.y / 2 - 100)
+	victory_panel.custom_minimum_size = Vector2(400, 200)
+	victory_panel.z_index = 1000
+	ui_layer.add_child(victory_panel)
+
+	var label = Label.new()
+	label.text = "ENEMY BOSS DESTROYED\n\nVICTORY!\n\n(Close game to restart)"
+	label.position = Vector2(20, 20)
+	label.add_theme_font_size_override("font_size", 24)
+	label.add_theme_color_override("font_color", Color(0.2, 1, 0.2, 1))
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	victory_panel.add_child(label)
+
+# ============================================================================
+# SCENE INITIALIZATION
+# ============================================================================
 
 func _ready():
+	# Initialize manager systems
+	initialize_managers()
+
 	# Setup camera
 	camera = Camera2D.new()
 	camera.name = "Camera"
@@ -72,8 +203,8 @@ func _ready():
 	# Setup resource UI
 	setup_resource_ui()
 
-	# Initialize lanes
-	initialize_lanes()
+	# Initialize lanes - now handled by ship_manager in initialize_managers()
+	# initialize_lanes()
 
 	# Setup mothership
 	setup_mothership()
@@ -81,8 +212,11 @@ func _ready():
 	# Setup turrets
 	setup_turrets()
 
-	# Setup enemy spawner
-	setup_enemy_spawner()
+	# Setup enemy turrets
+	setup_enemy_turrets()
+
+	# Setup enemy boss
+	setup_enemy_boss()
 
 	# Setup deployment UI
 	setup_deployment_ui()
@@ -472,7 +606,7 @@ func move_ship_to_cell(unit: Dictionary, target_cell: Vector2i):
 	print("Moved ship from (", old_row, ",", old_col, ") to (", new_row, ",", new_col, ")")
 
 func setup_mothership():
-	# Create mothership sprite on the left side
+	# Create mothership as a targetable combat object
 	var mothership_container = Control.new()
 	mothership_container.name = "Mothership"
 	mothership_container.position = Vector2(CombatConstants.MOTHERSHIP_X, get_viewport_rect().size.y / 2 - 100)
@@ -482,7 +616,7 @@ func setup_mothership():
 	var sprite = TextureRect.new()
 	sprite.name = "Sprite"
 	sprite.texture = CombatConstants.MothershipTexture
-	sprite.custom_minimum_size = Vector2(150, 150)
+	sprite.custom_minimum_size = Vector2(CombatConstants.MOTHERSHIP_SIZE, CombatConstants.MOTHERSHIP_SIZE)
 	sprite.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
 	sprite.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	mothership_container.add_child(sprite)
@@ -491,71 +625,170 @@ func setup_mothership():
 	var label = Label.new()
 	label.name = "Label"
 	label.text = "MOTHERSHIP"
-	label.position = Vector2(0, 160)
+	label.position = Vector2(0, CombatConstants.MOTHERSHIP_SIZE + 10)
 	label.add_theme_font_size_override("font_size", 16)
 	label.add_theme_color_override("font_color", Color(0.3, 0.8, 1, 1))
 	mothership_container.add_child(label)
 
-	print("Mothership created at x=", CombatConstants.MOTHERSHIP_X)
+	# Create combat object Dictionary
+	ship_manager.mothership = {
+		"object_type": "mothership",
+		"faction": "player",
+		"type": "mothership",
+		"display_name": "Mothership",
+		"lane_index": -1,  # Special: not in a specific lane
+		"grid_row": -1,  # Not in grid
+		"grid_col": -1,
+		"container": mothership_container,
+		"sprite": sprite,
+		"size": CombatConstants.MOTHERSHIP_SIZE,
+		"current_armor": CombatConstants.MOTHERSHIP_ARMOR,
+		"current_shield": CombatConstants.MOTHERSHIP_SHIELD,
+		"stats": {
+			"armor": CombatConstants.MOTHERSHIP_ARMOR,
+			"shield": CombatConstants.MOTHERSHIP_SHIELD,
+			"reinforced_armor": 0,
+			"evasion": 0,
+			"damage": 0,  # Mothership doesn't attack
+			"accuracy": 0,
+			"attack_speed": 0.0,
+			"num_attacks": 0
+		}
+	}
+
+	# Create health bar for mothership
+	create_health_bar(
+		mothership_container,
+		CombatConstants.MOTHERSHIP_SIZE,
+		CombatConstants.MOTHERSHIP_SHIELD,
+		CombatConstants.MOTHERSHIP_ARMOR
+	)
+
+	print("Mothership created as targetable combat object with ", CombatConstants.MOTHERSHIP_ARMOR, " armor, ", CombatConstants.MOTHERSHIP_SHIELD, " shield")
 
 func setup_turrets():
-	# Create 5 turrets in specific positions
-	# Position 1: Between lane 1 and 2
-	# Position 2: Between lane 2 and 3
-	# Position 3, 4, 5: In each lane (disabled)
+	# NEW: Create 3×5 grid of turrets (one per row per lane = 15 positions)
+	# Only middle row (row 2) starts enabled with cannon turrets
 
-	var turret_positions = [
-		{
-			"name": "Turret 1",
-			"x": CombatConstants.MOTHERSHIP_X + CombatConstants.TURRET_X_OFFSET,
-			"y": (lanes[0]["y_position"] + lanes[1]["y_position"]) / 2,  # Between lane 1 and 2
+	print("Setting up player turret grid (3 lanes × 5 rows = 15 positions)...")
+
+	var turrets_created = 0
+
+	# For each lane
+	for lane_index in range(CombatConstants.NUM_LANES):
+		# For each row in the lane
+		for row_index in range(CombatConstants.NUM_TURRET_ROWS):
+			# Only enable middle row (row 2) initially
+			var is_enabled = (row_index == 2)
+			var turret_type = "cannon_turret"  # All start as cannons (upgradeable later)
+
+			if is_enabled:
+				# Create enabled turret at this grid position
+				create_turret_at_grid_position(lane_index, row_index, turret_type, true)
+				turrets_created += 1
+			else:
+				# Create disabled turret placeholder
+				create_turret_at_grid_position(lane_index, row_index, turret_type, false)
+
+	print("Created ", turrets_created, " enabled turrets (middle row only), 12 disabled slots")
+
+func create_turret_at_grid_position(lane_index: int, row_index: int, turret_type: String, is_enabled: bool):
+	"""Create a turret at a specific grid position (lane, row)"""
+	# Get turret data from database
+	var db_turret_data = DataManager.get_ship_data(turret_type)
+	if db_turret_data == null:
+		print("ERROR: Turret type not found in database: ", turret_type)
+		return
+
+	# Calculate position using ship manager's helper
+	var x_pos = CombatConstants.TURRET_X_OFFSET
+	var y_pos = ship_manager.get_turret_y_position(lane_index, row_index)
+
+	# Create turret container
+	var turret_name = "Turret_L%d_R%d" % [lane_index, row_index]
+	var turret_container = Control.new()
+	turret_container.name = turret_name
+	turret_container.position = Vector2(x_pos, y_pos)
+	turret_container.z_index = 10
+	add_child(turret_container)
+
+	if is_enabled:
+		# Load turret sprite
+		var turret_texture: Texture2D = load(db_turret_data["sprite_path"])
+
+		# Create enabled turret sprite
+		var sprite = TextureRect.new()
+		sprite.name = "Sprite"
+		sprite.texture = turret_texture
+		sprite.custom_minimum_size = Vector2(CombatConstants.TURRET_SIZE, CombatConstants.TURRET_SIZE)
+		sprite.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
+		sprite.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		sprite.position = Vector2(-CombatConstants.TURRET_SIZE / 2, -CombatConstants.TURRET_SIZE / 2)
+		turret_container.add_child(sprite)
+
+		# Create turret data dictionary
+		var turret_data = {
+			"object_type": "turret",
+			"faction": "player",
+			"type": turret_type,
+			"display_name": db_turret_data["display_name"],
+			"lane_index": lane_index,  # NEW: Grid position
+			"grid_row": row_index,     # NEW: Grid row for targeting
+			"grid_col": -1,  # Turrets don't have a column
+			"container": turret_container,
+			"sprite": sprite,
+			"size": CombatConstants.TURRET_SIZE,
+			"position": Vector2(x_pos, y_pos),
 			"enabled": true,
-			"turret_type": "lightning_turret",
-			"target_lanes": [0, 1]  # Attacks lanes 1 and 2
-		},
-		{
-			"name": "Turret 2",
-			"x": CombatConstants.MOTHERSHIP_X + CombatConstants.TURRET_X_OFFSET,
-			"y": (lanes[1]["y_position"] + lanes[2]["y_position"]) / 2,  # Between lane 2 and 3
-			"enabled": true,
-			"turret_type": "cannon_turret",
-			"target_lanes": [1, 2]  # Attacks lanes 2 and 3
-		},
-		{
-			"name": "Turret 3",
-			"x": CombatConstants.MOTHERSHIP_X + CombatConstants.SECONDARY_TURRET_X_OFFSET,
-			"y": lanes[0]["y_position"],  # Lane 1
-			"enabled": false,
-			"turret_type": "lightning_turret",
-			"target_lanes": [0]  # Attacks lane 1 only
-		},
-		{
-			"name": "Turret 4",
-			"x": CombatConstants.MOTHERSHIP_X + CombatConstants.SECONDARY_TURRET_X_OFFSET,
-			"y": lanes[1]["y_position"],  # Lane 2
-			"enabled": false,
-			"turret_type": "cannon_turret",
-			"target_lanes": [1]  # Attacks lane 2 only
-		},
-		{
-			"name": "Turret 5",
-			"x": CombatConstants.MOTHERSHIP_X + CombatConstants.SECONDARY_TURRET_X_OFFSET,
-			"y": lanes[2]["y_position"],  # Lane 3
-			"enabled": false,
-			"turret_type": "lightning_turret",
-			"target_lanes": [2]  # Attacks lane 3 only
+			"current_armor": db_turret_data["armor"],
+			"current_shield": db_turret_data["shield"],
+			"stats": {
+				"armor": db_turret_data["armor"],
+				"shield": db_turret_data["shield"],
+				"reinforced_armor": db_turret_data.get("reinforced_armor", 0),
+				"damage": db_turret_data["damage"],
+				"accuracy": db_turret_data["accuracy"],
+				"attack_speed": db_turret_data["attack_speed"],
+				"num_attacks": db_turret_data.get("num_attacks", 1),
+				"evasion": db_turret_data.get("evasion", 0),
+				"starting_energy": db_turret_data.get("starting_energy", 0)
+			},
+			"current_energy": db_turret_data.get("starting_energy", 0),
+			"projectile_sprite": db_turret_data.get("projectile_sprite", "res://assets/Effects/laser_light/s_laser_light_001.png"),
+			"projectile_size": db_turret_data.get("projectile_size", 30),
+			"ability_function": db_turret_data.get("ability_function", ""),
+			"ability_name": db_turret_data.get("ability", ""),
+			"ability_description": db_turret_data.get("ability_description", "")
 		}
-	]
 
-	for i in range(turret_positions.size()):
-		var turret_pos = turret_positions[i]
-		create_turret(turret_pos["name"], turret_pos["turret_type"], turret_pos["x"], turret_pos["y"], turret_pos["enabled"], turret_pos["target_lanes"], i)
+		# Store in grid and legacy array
+		ship_manager.set_turret_at_position(lane_index, row_index, turret_data, "player")
+		turrets.append(turret_data)  # Also add to legacy array for compatibility
 
-	print("Created ", turrets.size(), " turrets")
+		# Create health bar
+		create_health_bar(
+			turret_container,
+			CombatConstants.TURRET_SIZE,
+			turret_data["current_shield"],
+			turret_data["current_armor"]
+		)
 
+		# Initialize energy bar
+		update_energy_bar(turret_data)
+	else:
+		# Create disabled turret placeholder
+		var label = Label.new()
+		label.name = "DisabledLabel"
+		label.text = "[ ]"  # Empty slot indicator
+		label.position = Vector2(-15, -15)
+		label.add_theme_font_size_override("font_size", 24)
+		label.add_theme_color_override("font_color", Color(0.3, 0.3, 0.3, 0.5))
+		turret_container.add_child(label)
+
+# Legacy function kept for backwards compatibility (not used in new grid system)
 func create_turret(turret_name: String, turret_type: String, x_pos: float, y_pos: float, is_enabled: bool, target_lanes: Array, turret_index: int):
 	# Get turret data from database
-	var db_turret_data = ShipDatabase.get_ship_data(turret_type)
+	var db_turret_data = DataManager.get_ship_data(turret_type)
 	if db_turret_data == null:
 		print("ERROR: Turret type not found in database: ", turret_type)
 		return
@@ -609,7 +842,7 @@ func create_turret(turret_name: String, turret_type: String, x_pos: float, y_pos
 			"projectile_sprite": db_turret_data.get("projectile_sprite", "res://assets/Effects/laser_light/s_laser_light_001.png"),
 			"projectile_size": db_turret_data.get("projectile_size", 30),
 			"ability_function": db_turret_data.get("ability_function", ""),
-			"ability_name": db_turret_data.get("abilty", ""),
+			"ability_name": db_turret_data.get("ability", ""),
 			"ability_description": db_turret_data.get("ability_description", "")
 		}
 
@@ -650,31 +883,261 @@ func create_turret(turret_name: String, turret_type: String, x_pos: float, y_pos
 		# Note: We don't add disabled turrets to the turrets array
 		# They're just visual placeholders
 
-func setup_enemy_spawner():
-	# Create enemy spawner placeholder on the right side
-	var spawner_container = Control.new()
-	spawner_container.name = "EnemySpawner"
-	spawner_container.position = Vector2(CombatConstants.ENEMY_SPAWN_X, get_viewport_rect().size.y / 2 - 100)
-	add_child(spawner_container)
+func setup_enemy_turrets():
+	# NEW: Create 3×5 grid of enemy turrets (one per row per lane = 15 positions)
+	# Only middle row (row 2) starts enabled with cannon turrets
 
-	# Add visual indicator (placeholder box)
-	var indicator = ColorRect.new()
-	indicator.name = "SpawnerIndicator"
-	indicator.color = Color(0.8, 0.2, 0.2, 0.5)
-	indicator.size = Vector2(100, 100)
-	spawner_container.add_child(indicator)
+	print("Setting up enemy turret grid (3 lanes × 5 rows = 15 positions)...")
+
+	var turrets_created = 0
+
+	# For each lane
+	for lane_index in range(CombatConstants.NUM_LANES):
+		# For each row in the lane
+		for row_index in range(CombatConstants.NUM_TURRET_ROWS):
+			# Only enable middle row (row 2) initially
+			var is_enabled = (row_index == 2)
+			var turret_type = "cannon_turret"  # Match player turrets
+
+			if is_enabled:
+				# Create enabled turret at this grid position
+				create_enemy_turret_at_grid_position(lane_index, row_index, turret_type, true)
+				turrets_created += 1
+			else:
+				# Create disabled turret placeholder
+				create_enemy_turret_at_grid_position(lane_index, row_index, turret_type, false)
+
+	print("Created ", turrets_created, " enabled enemy turrets (middle row only), 12 disabled slots")
+
+func create_enemy_turret_at_grid_position(lane_index: int, row_index: int, turret_type: String, is_enabled: bool):
+	"""Create an enemy turret at a specific grid position (lane, row)"""
+	# Get turret data from database
+	var db_turret_data = DataManager.get_ship_data(turret_type)
+	if db_turret_data == null:
+		print("ERROR: Enemy turret type not found in database: ", turret_type)
+		return
+
+	# Calculate position using ship manager's helper
+	var x_pos = CombatConstants.ENEMY_TURRET_X_OFFSET
+	var y_pos = ship_manager.get_turret_y_position(lane_index, row_index)
+
+	# Create turret container
+	var turret_name = "EnemyTurret_L%d_R%d" % [lane_index, row_index]
+	var turret_container = Control.new()
+	turret_container.name = turret_name
+	turret_container.position = Vector2(x_pos, y_pos)
+	turret_container.z_index = 10
+	add_child(turret_container)
+
+	if is_enabled:
+		# Load turret sprite
+		var turret_texture: Texture2D = load(db_turret_data["sprite_path"])
+
+		# Create enabled turret sprite
+		var sprite = TextureRect.new()
+		sprite.name = "Sprite"
+		sprite.texture = turret_texture
+		sprite.custom_minimum_size = Vector2(CombatConstants.TURRET_SIZE, CombatConstants.TURRET_SIZE)
+		sprite.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
+		sprite.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		sprite.flip_h = true  # Flip enemy turrets to face left
+		sprite.position = Vector2(-CombatConstants.TURRET_SIZE / 2, -CombatConstants.TURRET_SIZE / 2)
+		turret_container.add_child(sprite)
+
+		# Create turret data dictionary
+		var turret_data = {
+			"object_type": "enemy_turret",
+			"faction": "enemy",
+			"type": turret_type,
+			"display_name": db_turret_data["display_name"],
+			"lane_index": lane_index,  # NEW: Grid position
+			"grid_row": row_index,     # NEW: Grid row for targeting
+			"grid_col": -1,  # Turrets don't have a column
+			"container": turret_container,
+			"sprite": sprite,
+			"size": CombatConstants.TURRET_SIZE,
+			"position": Vector2(x_pos, y_pos),
+			"enabled": true,
+			"current_armor": db_turret_data["armor"],
+			"current_shield": db_turret_data["shield"],
+			"stats": {
+				"armor": db_turret_data["armor"],
+				"shield": db_turret_data["shield"],
+				"reinforced_armor": db_turret_data.get("reinforced_armor", 0),
+				"damage": db_turret_data["damage"],
+				"accuracy": db_turret_data["accuracy"],
+				"attack_speed": db_turret_data["attack_speed"],
+				"num_attacks": db_turret_data.get("num_attacks", 1),
+				"evasion": db_turret_data.get("evasion", 0),
+				"starting_energy": db_turret_data.get("starting_energy", 0)
+			},
+			"current_energy": db_turret_data.get("starting_energy", 0),
+			"projectile_sprite": db_turret_data.get("projectile_sprite", "res://assets/Effects/laser_light/s_laser_light_001.png"),
+			"projectile_size": db_turret_data.get("projectile_size", 30),
+			"ability_function": db_turret_data.get("ability_function", ""),
+			"ability_name": db_turret_data.get("ability", ""),
+			"ability_description": db_turret_data.get("ability_description", "")
+		}
+
+		# Store in grid and legacy array
+		ship_manager.set_turret_at_position(lane_index, row_index, turret_data, "enemy")
+		enemy_turrets.append(turret_data)  # Also add to legacy array for compatibility
+
+		# Create health bar
+		create_health_bar(
+			turret_container,
+			CombatConstants.TURRET_SIZE,
+			turret_data["current_shield"],
+			turret_data["current_armor"]
+		)
+
+		# Initialize energy bar
+		update_energy_bar(turret_data)
+	else:
+		# Create disabled turret placeholder
+		var label = Label.new()
+		label.name = "DisabledLabel"
+		label.text = "[ ]"  # Empty slot indicator
+		label.position = Vector2(-15, -15)
+		label.add_theme_font_size_override("font_size", 24)
+		label.add_theme_color_override("font_color", Color(0.5, 0.2, 0.2, 0.5))
+		turret_container.add_child(label)
+
+# Legacy function kept for backwards compatibility (not used in new grid system)
+func create_enemy_turret(turret_name: String, turret_type: String, x_pos: float, y_pos: float, lane_index: int):
+	# Get turret data from database
+	var db_turret_data = DataManager.get_ship_data(turret_type)
+	if db_turret_data == null:
+		print("ERROR: Enemy turret type not found in database: ", turret_type)
+		return
+
+	# Create turret container
+	var turret_container = Control.new()
+	turret_container.name = turret_name
+	turret_container.position = Vector2(x_pos, y_pos)
+	turret_container.z_index = 10  # Render turrets above lanes
+	add_child(turret_container)
+
+	# Load turret sprite
+	var turret_texture: Texture2D = load(db_turret_data["sprite_path"])
+
+	# Create turret sprite
+	var sprite = TextureRect.new()
+	sprite.name = "Sprite"
+	sprite.texture = turret_texture
+	sprite.custom_minimum_size = Vector2(CombatConstants.TURRET_SIZE, CombatConstants.TURRET_SIZE)
+	sprite.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
+	sprite.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	sprite.position = Vector2(-CombatConstants.TURRET_SIZE / 2, -CombatConstants.TURRET_SIZE / 2)  # Center the sprite
+
+	# Flip sprite to face left (toward player)
+	sprite.flip_h = true
+
+	turret_container.add_child(sprite)
+
+	# Create turret data dictionary
+	var turret_data = {
+		"object_type": "enemy_turret",  # Mark as enemy turret type
+		"faction": "enemy",  # Enemy faction
+		"type": turret_type,
+		"display_name": db_turret_data["display_name"],
+		"container": turret_container,
+		"sprite": sprite,
+		"size": CombatConstants.TURRET_SIZE,
+		"position": Vector2(x_pos, y_pos),
+		"enabled": true,
+		"target_lane": lane_index,  # This turret only attacks in this lane
+		"current_armor": db_turret_data["armor"],
+		"current_shield": db_turret_data["shield"],
+		"stats": {
+			"armor": db_turret_data["armor"],
+			"shield": db_turret_data["shield"],
+			"reinforced_armor": db_turret_data.get("reinforced_armor", 0),
+			"damage": db_turret_data["damage"],
+			"accuracy": db_turret_data["accuracy"],
+			"attack_speed": db_turret_data["attack_speed"],
+			"num_attacks": db_turret_data.get("num_attacks", 1),
+			"evasion": db_turret_data.get("evasion", 0),
+			"starting_energy": db_turret_data.get("starting_energy", 0)
+		},
+		"current_energy": db_turret_data.get("starting_energy", 0),
+		"projectile_sprite": db_turret_data.get("projectile_sprite", "res://assets/Effects/laser_light/s_laser_light_001.png"),
+		"projectile_size": db_turret_data.get("projectile_size", 30),
+		"ability_function": db_turret_data.get("ability_function", ""),
+		"ability_name": db_turret_data.get("ability", ""),
+		"ability_description": db_turret_data.get("ability_description", "")
+	}
+
+	enemy_turrets.append(turret_data)
+
+	# Create health bar
+	create_health_bar(turret_container, CombatConstants.TURRET_SIZE, turret_data["current_shield"], turret_data["current_armor"])
+
+	# Initialize energy bar
+	update_energy_bar(turret_data)
+
+func setup_enemy_boss():
+	# Create enemy boss as a targetable combat object
+	var boss_container = Control.new()
+	boss_container.name = "EnemyBoss"
+	boss_container.position = Vector2(CombatConstants.ENEMY_SPAWN_X, get_viewport_rect().size.y / 2 - 100)
+	add_child(boss_container)
+
+	# Add sprite (using elite enemy texture for now)
+	var sprite = TextureRect.new()
+	sprite.name = "Sprite"
+	sprite.texture = CombatConstants.EliteTexture
+	sprite.custom_minimum_size = Vector2(CombatConstants.BOSS_SIZE, CombatConstants.BOSS_SIZE)
+	sprite.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
+	sprite.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	sprite.flip_h = true  # Flip to face left
+	boss_container.add_child(sprite)
 
 	# Add label
 	var label = Label.new()
 	label.name = "Label"
-	label.text = "ENEMY\nSPAWNER"
-	label.position = Vector2(-20, 110)
-	label.add_theme_font_size_override("font_size", 14)
+	label.text = "ENEMY BOSS"
+	label.position = Vector2(-20, CombatConstants.BOSS_SIZE + 10)
+	label.add_theme_font_size_override("font_size", 16)
 	label.add_theme_color_override("font_color", Color(0.8, 0.2, 0.2, 1))
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	spawner_container.add_child(label)
+	boss_container.add_child(label)
 
-	print("Enemy spawner created at x=", CombatConstants.ENEMY_SPAWN_X)
+	# Create combat object Dictionary
+	ship_manager.enemy_boss = {
+		"object_type": "boss",
+		"faction": "enemy",
+		"type": "boss",
+		"display_name": "Enemy Boss",
+		"lane_index": -1,  # Special: not in a specific lane
+		"grid_row": -1,  # Not in grid
+		"grid_col": -1,
+		"container": boss_container,
+		"sprite": sprite,
+		"size": CombatConstants.BOSS_SIZE,
+		"current_armor": CombatConstants.BOSS_ARMOR,
+		"current_shield": CombatConstants.BOSS_SHIELD,
+		"stats": {
+			"armor": CombatConstants.BOSS_ARMOR,
+			"shield": CombatConstants.BOSS_SHIELD,
+			"reinforced_armor": 0,
+			"evasion": 0,
+			"damage": 0,  # Boss doesn't attack in current implementation
+			"accuracy": 0,
+			"attack_speed": 0.0,
+			"num_attacks": 0
+		}
+	}
+
+	# Create health bar for boss
+	create_health_bar(
+		boss_container,
+		CombatConstants.BOSS_SIZE,
+		CombatConstants.BOSS_SHIELD,
+		CombatConstants.BOSS_ARMOR
+	)
+
+	print("Enemy Boss created as targetable combat object with ", CombatConstants.BOSS_ARMOR, " armor, ", CombatConstants.BOSS_SHIELD, " shield")
 
 func setup_resource_ui():
 	# Create resource UI display
@@ -694,11 +1157,12 @@ func setup_enemy_deployment_ui():
 	deploy_enemy_button.position = Vector2(0, 550)  # Below player deploy button
 	deploy_enemy_button.size = Vector2(200, 50)
 	deploy_enemy_button.add_theme_font_size_override("font_size", 18)
+	deploy_enemy_button.add_to_group("ui")
 	deploy_enemy_button.pressed.connect(_on_deploy_enemy_button_pressed)
 	add_child(deploy_enemy_button)
 
 	# Get enemy ships from database
-	var enemy_ships = ShipDatabase.get_ships_by_faction("enemy")
+	var enemy_ships = DataManager.get_ships_by_faction("enemy")
 
 	# Calculate panel height based on number of enemies
 	var button_height = 50
@@ -713,6 +1177,7 @@ func setup_enemy_deployment_ui():
 	enemy_selection_panel.position = Vector2(350, 150)
 	enemy_selection_panel.size = Vector2(450, panel_height)
 	enemy_selection_panel.visible = false
+	enemy_selection_panel.add_to_group("ui")
 	add_child(enemy_selection_panel)
 
 	# Add panel background
@@ -794,11 +1259,12 @@ func setup_deployment_ui():
 	deploy_button.position = Vector2(0, 500)
 	deploy_button.size = Vector2(200, 50)
 	deploy_button.add_theme_font_size_override("font_size", 18)
+	deploy_button.add_to_group("ui")
 	deploy_button.pressed.connect(_on_deploy_button_pressed)
 	add_child(deploy_button)
 
 	# Get player ships from database
-	var player_ships = ShipDatabase.get_ships_by_faction("player")
+	var player_ships = DataManager.get_ships_by_faction("player")
 
 	# Calculate panel height based on number of ships
 	var button_height = 70
@@ -813,6 +1279,7 @@ func setup_deployment_ui():
 	ship_selection_panel.position = Vector2(350, 150)
 	ship_selection_panel.size = Vector2(450, panel_height)
 	ship_selection_panel.visible = false
+	ship_selection_panel.add_to_group("ui")
 	add_child(ship_selection_panel)
 
 	# Add panel background
@@ -915,7 +1382,11 @@ func _input(event):
 		if ship_selection_panel.visible or enemy_selection_panel.visible:
 			return
 
+		# Check if click is on any UI button or control element
 		var mouse_pos = get_global_mouse_position()
+		if is_clicking_on_ui(mouse_pos):
+			return
+
 		var lane_index = get_lane_at_position(mouse_pos)
 
 		if selected_ship_type != "":
@@ -933,13 +1404,48 @@ func _input(event):
 			if combat_paused and is_zoomed:
 				var clicked_unit = get_unit_at_position(mouse_pos)
 				if clicked_unit != null and not clicked_unit.is_empty():
-					# Check if ship can be moved (hasn't moved this turn)
-					if not clicked_unit.get("has_moved_this_turn", false):
-						start_ship_drag(clicked_unit, mouse_pos)
-						get_viewport().set_input_as_handled()
-						return
+					# Only allow dragging ships, not turrets
+					var is_turret = clicked_unit.get("object_type", "") in ["turret", "enemy_turret"]
+					if not is_turret:
+						# Check if ship can be moved (hasn't moved this turn)
+						if not clicked_unit.get("has_moved_this_turn", false):
+							start_ship_drag(clicked_unit, mouse_pos)
+							get_viewport().set_input_as_handled()
+							return
 
 			# Manual lane zoom removed - use turn progression button only
+
+func is_clicking_on_ui(mouse_pos: Vector2) -> bool:
+	# Check if mouse position is over any UI element (buttons, panels, etc.)
+	# This prevents clicking through UI elements to the game world
+
+	# Get all nodes and check if any Control nodes contain the mouse position
+	var all_nodes = get_tree().get_nodes_in_group("ui")
+	for node in all_nodes:
+		if node is Control and node.visible:
+			var rect = Rect2(node.global_position, node.size)
+			if rect.has_point(mouse_pos):
+				return true
+
+	# Also check common UI elements directly
+	var ui_elements = [
+		deploy_button,
+		deploy_enemy_button,
+		ship_selection_panel,
+		enemy_selection_panel,
+		return_button,
+		auto_combat_button,
+		turn_progression_button,
+		auto_deploy_button
+	]
+
+	for element in ui_elements:
+		if element != null and is_instance_valid(element) and element.visible:
+			var rect = Rect2(element.global_position, element.size)
+			if rect.has_point(mouse_pos):
+				return true
+
+	return false
 
 func get_lane_at_position(pos: Vector2) -> int:
 	# Determine which lane a position is in
@@ -951,7 +1457,49 @@ func get_lane_at_position(pos: Vector2) -> int:
 	return -1
 
 func get_unit_at_position(pos: Vector2) -> Dictionary:
-	# Check if mouse position intersects with any unit (ship or enemy)
+	# Check if mouse position intersects with any unit (ship, enemy, or turret)
+
+	# Check player turrets
+	for turret in turrets:
+		if not turret.has("container") or not turret.has("size"):
+			continue
+
+		var container = turret["container"]
+		var turret_size = turret["size"]
+		var turret_pos = container.position
+
+		# Create bounding box for turret
+		var box_x1 = turret_pos.x - turret_size / 2
+		var box_y1 = turret_pos.y - turret_size / 2
+		var box_x2 = turret_pos.x + turret_size / 2
+		var box_y2 = turret_pos.y + turret_size / 2
+
+		# Check if mouse is inside bounding box
+		if pos.x >= box_x1 and pos.x <= box_x2 and pos.y >= box_y1 and pos.y <= box_y2:
+			print("Found player turret at position - type: ", turret.get("type", "unknown"))
+			return turret
+
+	# Check enemy turrets
+	for enemy_turret in enemy_turrets:
+		if not enemy_turret.has("container") or not enemy_turret.has("size"):
+			continue
+
+		var container = enemy_turret["container"]
+		var turret_size = enemy_turret["size"]
+		var turret_pos = container.position
+
+		# Create bounding box for turret
+		var box_x1 = turret_pos.x - turret_size / 2
+		var box_y1 = turret_pos.y - turret_size / 2
+		var box_x2 = turret_pos.x + turret_size / 2
+		var box_y2 = turret_pos.y + turret_size / 2
+
+		# Check if mouse is inside bounding box
+		if pos.x >= box_x1 and pos.x <= box_x2 and pos.y >= box_y1 and pos.y <= box_y2:
+			print("Found enemy turret at position - type: ", enemy_turret.get("type", "unknown"))
+			return enemy_turret
+
+	# Check ships in lanes
 	for lane in lanes:
 		for unit in lane["units"]:
 			if not unit.has("container") or not unit.has("size"):
@@ -1057,7 +1605,7 @@ func deploy_ship_to_lane(ship_type: String, lane_index: int):
 	print("Deploying ", ship_type, " to lane ", lane_index)
 
 	# Get ship data from database
-	var db_ship_data = ShipDatabase.get_ship_data(ship_type)
+	var db_ship_data = DataManager.get_ship_data(ship_type)
 	if db_ship_data.is_empty():
 		print("ERROR: Ship type '", ship_type, "' not found in database")
 		return
@@ -1171,7 +1719,7 @@ func deploy_ship_to_lane(ship_type: String, lane_index: int):
 
 		# Ability data
 		"ability_function": db_ship_data.get("ability_function", ""),
-		"ability_name": db_ship_data.get("abilty", ""),
+		"ability_name": db_ship_data.get("ability", ""),
 		"ability_description": db_ship_data.get("ability_description", "")
 	}
 
@@ -1197,7 +1745,7 @@ func deploy_enemy_to_lane(enemy_type: String, lane_index: int):
 	print("Deploying ", enemy_type, " to lane ", lane_index)
 
 	# Get enemy data from database
-	var db_enemy_data = ShipDatabase.get_ship_data(enemy_type)
+	var db_enemy_data = DataManager.get_ship_data(enemy_type)
 	if db_enemy_data.is_empty():
 		print("ERROR: Enemy type '", enemy_type, "' not found in database")
 		return
@@ -1394,6 +1942,7 @@ func setup_return_button():
 	return_button.position = Vector2(1110, 10)
 	return_button.custom_minimum_size = Vector2(30, 30)
 	return_button.ignore_texture_size = true
+	return_button.add_to_group("ui")
 	return_button.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
 	return_button.visible = false
 	return_button.pressed.connect(_on_return_to_tactical)
@@ -1409,6 +1958,7 @@ func setup_auto_combat_button():
 	auto_combat_button.position = Vector2(0, 400)
 	auto_combat_button.size = Vector2(250, 50)
 	auto_combat_button.add_theme_font_size_override("font_size", 18)
+	auto_combat_button.add_to_group("ui")
 	auto_combat_button.pressed.connect(_on_auto_combat_toggled)
 	add_child(auto_combat_button)
 
@@ -1420,6 +1970,7 @@ func setup_auto_deploy_button():
 	auto_deploy_button.position = Vector2(0, 450)  # Below auto-combat button
 	auto_deploy_button.size = Vector2(250, 50)
 	auto_deploy_button.add_theme_font_size_override("font_size", 18)
+	auto_deploy_button.add_to_group("ui")
 	auto_deploy_button.pressed.connect(_on_auto_deploy_pressed)
 	add_child(auto_deploy_button)
 
@@ -1604,6 +2155,7 @@ func setup_turn_progression_button():
 	turn_progression_button.position = Vector2(850, 580)  # Bottom-right
 	turn_progression_button.size = Vector2(280, 50)
 	turn_progression_button.add_theme_font_size_override("font_size", 20)
+	turn_progression_button.add_to_group("ui")
 	turn_progression_button.visible = false  # Hidden until turn mode starts
 	turn_progression_button.pressed.connect(_on_turn_progression_pressed)
 
@@ -1926,26 +2478,44 @@ func fire_single_laser():
 	var flight_duration = 0.2
 	var tween = create_tween()
 	tween.tween_property(laser, "position", end_pos, flight_duration)
-	tween.tween_callback(func():
-		# Hit the target
-		on_laser_hit(laser)
-	)
+	tween.tween_callback(on_laser_hit.bind(laser))
 
 func on_laser_hit(laser: Sprite2D):
 	# Handle laser reaching target position
 	# If hit: destroy laser and apply damage
 	# If miss: continue traveling until off-screen
 
-	# Calculate and apply damage
-	var damage_dealt = 0
+	# Calculate damage
+	var damage_result = {"damage": 0, "is_crit": false, "is_miss": false}
 	if not selected_attacker.is_empty() and not selected_target.is_empty():
-		damage_dealt = calculate_damage(selected_attacker, selected_target)
-		if damage_dealt > 0:
-			apply_damage(selected_target, damage_dealt)
+		damage_result = calculate_damage(selected_attacker, selected_target)
+
+	# Get target position for damage numbers (center of sprite)
+	var target_pos = Vector2.ZERO
+	if selected_target.has("sprite") and is_instance_valid(selected_target["sprite"]):
+		var sprite = selected_target["sprite"]
+		target_pos = sprite.global_position + Vector2(0, sprite.size.y / 2.0)
 
 	# Check if attack hit or missed
-	if damage_dealt > 0:
-		# HIT - Remove the laser projectile
+	if damage_result["is_miss"]:
+		# MISS - Show miss damage number and continue laser off-screen
+		DamageNumber.show_miss(self, target_pos)
+		continue_laser_off_screen(laser)
+	elif damage_result["damage"] > 0:
+		# HIT - Apply damage and show damage numbers
+		var damage_breakdown = apply_damage(selected_target, damage_result["damage"])
+
+		# Show damage numbers for shield and armor damage
+		if damage_breakdown["shield_damage"] > 0:
+			DamageNumber.show_shield_damage(self, target_pos, damage_breakdown["shield_damage"], damage_result["is_crit"])
+		if damage_breakdown["armor_damage"] > 0:
+			# Offset armor damage number slightly if both shield and armor were damaged
+			var armor_pos = target_pos
+			if damage_breakdown["shield_damage"] > 0:
+				armor_pos.y += 20  # Offset downward
+			DamageNumber.show_armor_damage(self, armor_pos, damage_breakdown["armor_damage"], damage_result["is_crit"])
+
+		# Remove the laser projectile
 		laser.queue_free()
 
 		# Flash the target
@@ -1957,7 +2527,7 @@ func on_laser_hit(laser: Sprite2D):
 			flash_tween.tween_property(target_sprite, "modulate", Color(2.0, 2.0, 2.0, 1.0), 0.05)  # Flash white
 			flash_tween.tween_property(target_sprite, "modulate", Color(1.0, 1.0, 1.0, 1.0), 0.1)   # Return to normal
 	else:
-		# MISS - Continue traveling in same direction until off-screen
+		# No damage (shouldn't happen, but handle gracefully)
 		continue_laser_off_screen(laser)
 
 func continue_laser_off_screen(laser: Sprite2D):
@@ -1993,12 +2563,14 @@ func continue_laser_off_screen(laser: Sprite2D):
 			laser.queue_free()
 	)
 
-func calculate_damage(attacker: Dictionary, target: Dictionary) -> int:
+func calculate_damage(attacker: Dictionary, target: Dictionary) -> Dictionary:
 	# Calculate damage from attacker to target
-	# Returns 0 if attack misses, otherwise returns damage amount
+	# Returns dictionary with: {damage: int, is_crit: bool, is_miss: bool}
+
+	var result = {"damage": 0, "is_crit": false, "is_miss": false}
 
 	if attacker.is_empty() or target.is_empty():
-		return 0
+		return result
 
 	# Get stats
 	var attacker_accuracy = attacker["stats"].get("accuracy", 0)
@@ -2006,48 +2578,51 @@ func calculate_damage(attacker: Dictionary, target: Dictionary) -> int:
 	var target_evasion = target["stats"].get("evasion", 0)
 	var target_reinforced = target["stats"].get("reinforced_armor", 0)
 
-	# Hit chance calculation: accuracy / (accuracy + evasion)
-
+	# Hit chance calculation
 	var hit_chance = 1.0
-	hit_chance -= (target_evasion*.01)
+	hit_chance -= (target_evasion * 0.01)
 	if hit_chance < 0:
 		hit_chance = 0
-	
-	var crit_chance = 1.0-((attacker_accuracy)*.01)
+
+	# Crit chance calculation
+	var crit_chance = 1.0 - (attacker_accuracy * 0.01)
 	var crit_roll = randf()
 	var critical_hit = false
 	if crit_roll > crit_chance:
 		critical_hit = true
-	if (critical_hit):
-		#it has a chance to negate a crit via a critical hit of its own.  so if a ship has 15 reinforced, then it has a 15% chance to negate any critical hit against it and reduce it to a normal hit
-		print("crit!")
+		result["is_crit"] = true
+
 	# Roll for hit/miss
-	var roll = randf()  # Random float between 0.0 and 1.0
+	var roll = randf()
 	if roll > hit_chance:
 		print("MISS! (rolled ", roll, " vs hit chance ", hit_chance, ")")
-		return 0  # Attack missed
+		result["is_miss"] = true
+		return result
 
 	# Hit! Calculate damage
 	var base_damage = attacker_damage
 
-	# Apply reinforced armor reduction (reduces damage by %)
-	# reinforced_armor of 10 = 10% damage reduction
-	# reinforced_armor of 50 = 50% damage reduction
+	# Apply reinforced armor reduction
 	var damage_multiplier = 1.0 - (float(target_reinforced) / 100.0)
-	damage_multiplier = max(0.0, damage_multiplier)  # Can't go below 0
+	damage_multiplier = max(0.0, damage_multiplier)
 
 	var final_damage = int(base_damage * damage_multiplier)
-	if (critical_hit):
-		final_damage*=2
+	if critical_hit:
+		final_damage *= 2
+		print("CRIT!")
 	final_damage = max(1, final_damage)  # Always do at least 1 damage on hit
 
+	result["damage"] = final_damage
 	print("HIT! Damage: ", final_damage, " (base: ", base_damage, ", armor reduction: ", target_reinforced, "%)")
-	return final_damage
+	return result
 
-func apply_damage(target: Dictionary, damage: int):
+func apply_damage(target: Dictionary, damage: int) -> Dictionary:
 	# Apply damage to target's shields first, then armor
+	# Returns: {shield_damage: int, armor_damage: int}
+	var damage_breakdown = {"shield_damage": 0, "armor_damage": 0}
+
 	if target.is_empty():
-		return
+		return damage_breakdown
 
 	var remaining_damage = damage
 
@@ -2056,22 +2631,49 @@ func apply_damage(target: Dictionary, damage: int):
 		var shield_damage = min(target["current_shield"], remaining_damage)
 		target["current_shield"] -= shield_damage
 		remaining_damage -= shield_damage
+		damage_breakdown["shield_damage"] = shield_damage
 		print("  Shield damaged: -", shield_damage, " (", target["current_shield"], " remaining)")
 
 	# Overflow damage goes to armor
 	if remaining_damage > 0 and target.has("current_armor"):
 		var armor_damage = min(target["current_armor"], remaining_damage)
 		target["current_armor"] -= armor_damage
+		damage_breakdown["armor_damage"] = armor_damage
 		print("  Armor damaged: -", armor_damage, " (", target["current_armor"], " remaining)")
 
 	# Update health bar
 	update_health_bar(target)
+
+	# Generate energy from damage taken (1 energy per 5% of combined health lost)
+	if not target.get("ability_active", false):
+		var max_energy = target.get("stats", {}).get("energy", 0)
+		if max_energy > 0:
+			var max_shield = target.get("stats", {}).get("shield", 0)
+			var max_armor = target.get("stats", {}).get("armor", 0)
+			var max_combined_health = max_shield + max_armor
+
+			if max_combined_health > 0:
+				var total_damage_dealt = damage_breakdown["shield_damage"] + damage_breakdown["armor_damage"]
+				var percent_lost = float(total_damage_dealt) / float(max_combined_health)
+				var energy_gain = floor(percent_lost * 20.0)  # 1 energy per 5% = 20 energy for 100%
+
+				if energy_gain > 0:
+					var current_energy = target.get("current_energy", 0)
+					target["current_energy"] = min(current_energy + energy_gain, max_energy)
+					print("  ", target.get("type", "unknown"), " gained ", energy_gain, " energy from damage (", target["current_energy"], "/", max_energy, ")")
+					update_energy_bar(target)
+
+					# Check if energy is full after damage
+					if target["current_energy"] >= max_energy:
+						cast_ability(target)
 
 	# Check if ship is destroyed
 	var total_health = target.get("current_armor", 0) + target.get("current_shield", 0)
 	if total_health <= 0:
 		print("  SHIP DESTROYED!")
 		destroy_ship(target)
+
+	return damage_breakdown
 
 func start_continuous_attack():
 	# Start attack cycle - attacks happen at attack_speed per second
@@ -2405,6 +3007,9 @@ func start_lane_combat(lane_index: int):
 	# Activate turrets that can attack this lane
 	activate_turrets_for_lane(lane_index)
 
+	# Activate enemy turrets that can attack this lane
+	activate_enemy_turrets_for_lane(lane_index)
+
 	for unit in lane["units"]:
 		# Assign random target (will be restricted to same lane due to is_zoomed)
 		assign_random_target(unit)
@@ -2422,7 +3027,14 @@ func stop_lane_combat(lane_index: int):
 	# Deactivate turrets that were attacking this lane
 	deactivate_turrets_for_lane(lane_index)
 
+	# Deactivate enemy turrets that were attacking this lane
+	deactivate_enemy_turrets_for_lane(lane_index)
+
 	for unit in lane["units"]:
+		# End any active abilities when turn ends
+		if unit.get("ability_active", false):
+			end_active_ability(unit)
+
 		# Stop attack timers
 		if unit.has("container"):
 			var container = unit["container"]
@@ -2443,88 +3055,55 @@ func stop_lane_combat(lane_index: int):
 # Turret combat functions
 
 func activate_turrets_for_lane(lane_index: int):
-	# Activate all turrets that can attack this lane
+	# NEW: Activate all turrets in this lane (all 5 rows)
 	print("Activating turrets for lane ", lane_index)
 
-	for turret in turrets:
-		if not turret["enabled"]:
+	# Activate all enabled turrets in this lane's grid
+	for row_index in range(CombatConstants.NUM_TURRET_ROWS):
+		var turret = ship_manager.get_turret_at_position(lane_index, row_index, "player")
+
+		if turret.is_empty() or not turret.get("enabled", false):
 			continue
 
-		# Check if this turret targets this lane
-		if lane_index in turret["target_lanes"]:
-			print("  Turret ", turret["display_name"], " engaging lane ", lane_index)
-			# Store the active lane for this turret's current activation
-			turret["active_lane"] = lane_index
-			# Assign targets ONLY from the currently active lane
-			assign_turret_targets(turret, lane_index)
-			# Start attack timer
-			start_turret_attack_timer(turret)
+		print("  Turret ", turret["display_name"], " (row ", row_index, ") engaging lane ", lane_index)
+
+		# Turret uses gamma targeting automatically
+		var target = targeting_system.select_target_for_unit(turret, "gamma")
+		turret["auto_target"] = target
+
+		# Start attack timer
+		start_turret_attack_timer(turret)
 
 func deactivate_turrets_for_lane(lane_index: int):
-	# Deactivate turrets that were attacking this lane
-	# Note: We need to be careful - some turrets attack multiple lanes
-	# Only stop turrets if ALL their target lanes are inactive
+	# NEW: Deactivate all turrets in this lane (all 5 rows)
 	print("Deactivating turrets for lane ", lane_index)
 
-	for turret in turrets:
-		if not turret["enabled"]:
+	# Deactivate all enabled turrets in this lane's grid
+	for row_index in range(CombatConstants.NUM_TURRET_ROWS):
+		var turret = ship_manager.get_turret_at_position(lane_index, row_index, "player")
+
+		if turret.is_empty() or not turret.get("enabled", false):
 			continue
 
-		# Check if this turret targets this lane
-		if lane_index in turret["target_lanes"]:
-			# Stop this turret (we'll only have one lane active at a time in turn mode)
-			stop_turret_combat(turret)
+		# Stop this turret
+		stop_turret_combat(turret)
 
 func assign_turret_targets(turret: Dictionary, active_lane: int = -1):
-	# Assign enemy targets from the turret's target lanes
-	# If active_lane is specified, only target enemies in that specific lane
+	# NEW: Use gamma targeting system for turrets
+	# Turrets now target: ship in same row → turret in same row → mothership/boss
 	if turret.is_empty() or not turret["enabled"]:
 		return
 
-	var potential_targets: Array[Dictionary] = []
+	# Use the targeting system to select target via gamma targeting
+	var target = targeting_system.select_target_for_unit(turret, "gamma")
 
-	# If we have an active lane restriction, only use that lane
-	if active_lane >= 0:
-		# Only target the active lane
-		if active_lane < 0 or active_lane >= lanes.size():
-			print("  Invalid active lane for turret ", turret["display_name"])
-			turret.erase("auto_target")
-			return
-
-		# Check if this turret can actually target this lane
-		if active_lane not in turret["target_lanes"]:
-			print("  Turret ", turret["display_name"], " cannot target lane ", active_lane)
-			turret.erase("auto_target")
-			return
-
-		var lane = lanes[active_lane]
-		for unit in lane["units"]:
-			# Turrets attack enemies only
-			if unit.get("is_enemy", false):
-				potential_targets.append(unit)
-	else:
-		# No lane restriction - target all lanes this turret can attack
-		var target_lanes_array = turret["target_lanes"]
-		for lane_idx in target_lanes_array:
-			if lane_idx < 0 or lane_idx >= lanes.size():
-				continue
-
-			var lane = lanes[lane_idx]
-			for unit in lane["units"]:
-				# Turrets attack enemies only
-				if unit.get("is_enemy", false):
-					potential_targets.append(unit)
-
-	if potential_targets.size() == 0:
-		print("  No targets found for turret ", turret["display_name"])
+	if target.is_empty():
+		print("  No targets found for turret ", turret.get("display_name", "unnamed turret"))
 		turret.erase("auto_target")
 		return
 
-	# Pick a random target
-	var target = potential_targets[randi() % potential_targets.size()]
 	turret["auto_target"] = target
-
-	print("  Turret ", turret["display_name"], " targeting ", target.get("type", "unknown"))
+	print("  Turret ", turret.get("display_name", "unnamed turret"), " targeting ", target.get("type", "unknown"))
 
 func start_turret_attack_timer(turret: Dictionary):
 	# Start attack timer for turret
@@ -2611,6 +3190,158 @@ func stop_turret_combat(turret: Dictionary):
 	# Reset sprite modulation
 	if turret.has("sprite"):
 		turret["sprite"].modulate = Color(1, 1, 1)
+
+# Enemy Turret Functions
+func activate_enemy_turrets_for_lane(lane_index: int):
+	# NEW: Activate all enemy turrets in this lane (all 5 rows)
+	print("Activating enemy turrets for lane ", lane_index)
+
+	# Activate all enabled enemy turrets in this lane's grid
+	for row_index in range(CombatConstants.NUM_TURRET_ROWS):
+		var enemy_turret = ship_manager.get_turret_at_position(lane_index, row_index, "enemy")
+
+		if enemy_turret.is_empty() or not enemy_turret.get("enabled", false):
+			continue
+
+		print("  Enemy Turret ", enemy_turret["display_name"], " (row ", row_index, ") engaging lane ", lane_index)
+
+		# Enemy turret uses gamma targeting automatically
+		var target = targeting_system.select_target_for_unit(enemy_turret, "gamma")
+		enemy_turret["auto_target"] = target
+
+		# Start attack timer
+		start_enemy_turret_attack_timer(enemy_turret)
+
+func deactivate_enemy_turrets_for_lane(lane_index: int):
+	# NEW: Deactivate all enemy turrets in this lane (all 5 rows)
+	print("Deactivating enemy turrets for lane ", lane_index)
+
+	# Deactivate all enabled enemy turrets in this lane's grid
+	for row_index in range(CombatConstants.NUM_TURRET_ROWS):
+		var enemy_turret = ship_manager.get_turret_at_position(lane_index, row_index, "enemy")
+
+		if enemy_turret.is_empty() or not enemy_turret.get("enabled", false):
+			continue
+
+		stop_enemy_turret_combat(enemy_turret)
+
+func assign_enemy_turret_target(enemy_turret: Dictionary, active_lane: int = -1):
+	# NEW: Use gamma targeting system for enemy turrets
+	# Enemy turrets now target: ship in same row → turret in same row → mothership
+	if enemy_turret.is_empty() or not enemy_turret["enabled"]:
+		return
+
+	# Use the targeting system to select target via gamma targeting
+	var target = targeting_system.select_target_for_unit(enemy_turret, "gamma")
+
+	if target.is_empty():
+		print("  No targets found for enemy turret ", enemy_turret.get("display_name", "unnamed enemy turret"))
+		enemy_turret.erase("auto_target")
+		return
+
+	enemy_turret["auto_target"] = target
+	print("  Enemy Turret ", enemy_turret.get("display_name", "unnamed enemy turret"), " targeting ", target.get("type", "unknown"))
+
+func start_enemy_turret_attack_timer(enemy_turret: Dictionary):
+	# Start attack timer for enemy turret
+	if not enemy_turret.has("container"):
+		return
+
+	var container = enemy_turret["container"]
+
+	# Remove existing timer if any
+	var existing_timer = container.get_node_or_null("AttackTimer")
+	if existing_timer:
+		existing_timer.queue_free()
+
+	# Create attack timer
+	var attack_timer = Timer.new()
+	attack_timer.name = "AttackTimer"
+	var attack_interval = 1.0 / enemy_turret["stats"]["attack_speed"]
+	attack_timer.wait_time = attack_interval
+	attack_timer.autostart = true
+	attack_timer.timeout.connect(func():
+		enemy_turret_auto_attack(enemy_turret)
+	)
+	container.add_child(attack_timer)
+
+	# Create target switch timer (switches targets every 3 seconds)
+	var switch_timer = Timer.new()
+	switch_timer.name = "TargetSwitchTimer"
+	switch_timer.wait_time = 3.0
+	switch_timer.autostart = true
+	switch_timer.timeout.connect(func():
+		# Reassign target
+		var current_lane = enemy_turret.get("target_lane", -1)
+		assign_enemy_turret_target(enemy_turret, current_lane)
+	)
+	container.add_child(switch_timer)
+
+	print("  Enemy turret attack timer started: ", attack_interval, "s interval")
+
+func enemy_turret_auto_attack(enemy_turret: Dictionary):
+	# Enemy turret performs an auto-attack on its assigned target
+	if enemy_turret.is_empty():
+		return
+
+	# Check if we have a target
+	if not enemy_turret.has("auto_target") or enemy_turret["auto_target"].is_empty():
+		# Try to find a target
+		assign_enemy_turret_target(enemy_turret, enemy_turret.get("target_lane", -1))
+		return
+
+	var target = enemy_turret["auto_target"]
+
+	# Validate target still exists
+	if not is_instance_valid(target.get("container")):
+		# Target destroyed, find new target
+		assign_enemy_turret_target(enemy_turret, enemy_turret.get("target_lane", -1))
+		return
+
+	# Rotate turret to face target
+	#auto_rotate_to_target(enemy_turret, target)
+
+	# Fire projectile at target
+	auto_fire_laser(enemy_turret, target)
+
+	# Generate energy (if applicable)
+	if enemy_turret.has("current_energy") and not enemy_turret.get("ability_active", false):
+		var energy_gain = randi_range(2, 4)
+		enemy_turret["current_energy"] = min(
+			enemy_turret["current_energy"] + energy_gain,
+			enemy_turret["stats"].get("starting_energy", 100)
+		)
+		update_energy_bar(enemy_turret)
+
+		# Check if ability should be cast
+		if enemy_turret["current_energy"] >= enemy_turret["stats"].get("starting_energy", 100):
+			cast_ability(enemy_turret)
+
+func stop_enemy_turret_combat(enemy_turret: Dictionary):
+	# Stop an enemy turret's combat
+	if not enemy_turret.has("container"):
+		return
+
+	var container = enemy_turret["container"]
+
+	# Stop attack timer
+	var attack_timer = container.get_node_or_null("AttackTimer")
+	if attack_timer:
+		attack_timer.stop()
+		attack_timer.queue_free()
+
+	# Stop switch timer
+	var switch_timer = container.get_node_or_null("TargetSwitchTimer")
+	if switch_timer:
+		switch_timer.stop()
+		switch_timer.queue_free()
+
+	# Clear target
+	enemy_turret.erase("auto_target")
+
+	# Reset sprite modulation
+	if enemy_turret.has("sprite"):
+		enemy_turret["sprite"].modulate = Color(1, 1, 1)
 
 func start_auto_combat():
 	# Start auto-combat: all ships attack random enemies
@@ -2886,8 +3617,8 @@ func targeting_function_beta(unit: Dictionary) -> Dictionary:
 # ============================================================================
 
 func assign_random_target(unit: Dictionary, restrict_to_lane: int = -1):
-	# Assign a target to a unit based on current targeting mode (alpha, beta, or random)
-	# Checks is_enemy flag to determine which targeting mode to use
+	# NEW: Use CombatTargetingSystem for target selection
+	# Assign a target to a unit based on current targeting mode (gamma is default)
 
 	if unit.is_empty():
 		return
@@ -2896,14 +3627,8 @@ func assign_random_target(unit: Dictionary, restrict_to_lane: int = -1):
 	var is_enemy = unit.get("is_enemy", false)
 	var target_mode = enemy_targeting_mode if is_enemy else player_targeting_mode
 
-	# Get target using selected mode
-	var target = {}
-	if target_mode == "alpha":
-		target = targeting_function_alpha(unit)
-	elif target_mode == "beta":
-		target = targeting_function_beta(unit)
-	else:  # "random"
-		target = targeting_function_random(unit, restrict_to_lane)
+	# Use the targeting system to select target
+	var target = targeting_system.select_target_for_unit(unit, target_mode)
 
 	if target.is_empty():
 		unit["auto_target"] = null
@@ -3168,9 +3893,7 @@ func auto_fire_single_laser(attacker: Dictionary, target: Dictionary):
 	var flight_duration = 0.2
 	var tween = create_tween()
 	tween.tween_property(laser, "position", end_pos, flight_duration)
-	tween.tween_callback(func():
-		auto_on_laser_hit(laser, attacker, target)
-	)
+	tween.tween_callback(auto_on_laser_hit.bind(laser, attacker, target))
 
 func auto_on_laser_hit(laser: Sprite2D, attacker: Dictionary, target: Dictionary):
 	# Handle laser reaching target position in auto-combat
@@ -3185,14 +3908,36 @@ func auto_on_laser_hit(laser: Sprite2D, attacker: Dictionary, target: Dictionary
 		laser.queue_free()
 		return
 
-	# Calculate and apply damage
-	var damage_dealt = calculate_damage(attacker, target)
+	# Calculate damage
+	var damage_result = calculate_damage(attacker, target)
+
+	# Get target position for damage numbers (center of sprite)
+	var target_pos = Vector2.ZERO
+	if target.has("sprite") and is_instance_valid(target["sprite"]):
+		var sprite = target["sprite"]
+		target_pos = sprite.global_position + Vector2(0, sprite.size.y / 2.0)
 
 	# Check if attack hit or missed
-	if damage_dealt > 0:
-		# HIT - Remove the laser projectile and apply damage
+	if damage_result["is_miss"]:
+		# MISS - Show miss damage number and continue laser off-screen
+		DamageNumber.show_miss(self, target_pos)
+		continue_laser_off_screen(laser)
+	elif damage_result["damage"] > 0:
+		# HIT - Apply damage and show damage numbers
+		var damage_breakdown = apply_damage(target, damage_result["damage"])
+
+		# Show damage numbers for shield and armor damage
+		if damage_breakdown["shield_damage"] > 0:
+			DamageNumber.show_shield_damage(self, target_pos, damage_breakdown["shield_damage"], damage_result["is_crit"])
+		if damage_breakdown["armor_damage"] > 0:
+			# Offset armor damage number slightly if both shield and armor were damaged
+			var armor_pos = target_pos
+			if damage_breakdown["shield_damage"] > 0:
+				armor_pos.y += 20  # Offset downward
+			DamageNumber.show_armor_damage(self, armor_pos, damage_breakdown["armor_damage"], damage_result["is_crit"])
+
+		# Remove the laser projectile
 		laser.queue_free()
-		apply_damage(target, damage_dealt)
 
 		# Flash target
 		if target.has("sprite"):
@@ -3201,7 +3946,7 @@ func auto_on_laser_hit(laser: Sprite2D, attacker: Dictionary, target: Dictionary
 			flash_tween.tween_property(target_sprite, "modulate", Color(2.0, 2.0, 2.0, 1.0), 0.05)
 			flash_tween.tween_property(target_sprite, "modulate", Color(1.0, 1.0, 1.0, 1.0), 0.1)
 	else:
-		# MISS - Continue traveling in same direction until off-screen
+		# No damage (shouldn't happen, but handle gracefully)
 		continue_laser_off_screen(laser)
 
 
@@ -3214,6 +3959,10 @@ func gain_energy(unit: Dictionary):
 
 	# Don't gain energy when combat is paused
 	if combat_paused:
+		return
+
+	# Don't gain energy if ability is currently active
+	if unit.get("ability_active", false):
 		return
 
 	# Skip if unit has no energy system (max energy = 0)
@@ -3253,12 +4002,157 @@ func cast_ability(unit: Dictionary):
 	print("Function: ", ability_function)
 	print("====================")
 
+	# Show visual notification of ability cast
+	show_ability_notification(unit, ability_name)
+
 	# Reset energy to 0
 	unit["current_energy"] = 0
 	update_energy_bar(unit)
 
-	# TODO: Actually call the ability function when implemented
-	# For now just print to console
+	# Call the ability function dynamically
+	if ability_function != "" and has_method(ability_function):
+		call(ability_function, unit)
+	else:
+		print("WARNING: Ability function not found: ", ability_function)
+
+func show_ability_notification(unit: Dictionary, ability_name: String):
+	"""Display floating text notification when ability is cast"""
+	if unit.is_empty() or not unit.has("container"):
+		return
+
+	var container = unit["container"]
+	var unit_size = unit.get("size", 32)
+
+	# Create notification label
+	var notification = Label.new()
+	notification.text = ability_name.to_upper() + "!"
+	notification.add_theme_font_size_override("font_size", 18)
+	notification.add_theme_color_override("font_color", Color(1.0, 0.9, 0.2))  # Gold/yellow
+	notification.add_theme_color_override("font_outline_color", Color(0, 0, 0))
+	notification.add_theme_constant_override("outline_size", 3)
+	notification.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	notification.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+
+	# Position above the ship (above health bars)
+	notification.position = Vector2(-50, -40)  # Centered and above
+	notification.z_index = 150  # Very high, above everything
+	container.add_child(notification)
+
+	# Animate: float up and fade out
+	var tween = create_tween()
+	tween.set_parallel(true)
+
+	# Float upward
+	tween.tween_property(notification, "position:y", notification.position.y - 30, 1.0) \
+		.set_trans(Tween.TRANS_SINE) \
+		.set_ease(Tween.EASE_OUT)
+
+	# Fade out after 0.5 seconds
+	tween.tween_property(notification, "modulate:a", 0.0, 0.5) \
+		.set_delay(0.5)
+
+	# Destroy after animation
+	tween.finished.connect(func():
+		if is_instance_valid(notification):
+			notification.queue_free()
+	)
+
+# ============================================================================
+# ABILITY IMPLEMENTATIONS
+# ============================================================================
+
+func execute_alpha_strike(unit: Dictionary):
+	"""Alpha Strike: Double attack speed for 3 seconds"""
+	if unit.is_empty():
+		return
+
+	print(">>> Alpha Strike activated for ", unit.get("type", "unknown"), " <<<")
+
+	# Store original attack speed
+	var original_attack_speed = unit["stats"]["attack_speed"]
+	unit["original_attack_speed"] = original_attack_speed
+
+	# Double the attack speed
+	unit["stats"]["attack_speed"] = original_attack_speed * 2.0
+
+	# Mark ability as active (blocks energy generation)
+	unit["ability_active"] = true
+
+	# Update the attack timer if it exists
+	if unit.has("container"):
+		var container = unit["container"]
+		var attack_timer = container.get_node_or_null("AttackTimer")
+		if attack_timer:
+			var new_interval = 1.0 / unit["stats"]["attack_speed"]
+			attack_timer.wait_time = new_interval
+			print("  Attack speed: ", original_attack_speed, " → ", unit["stats"]["attack_speed"])
+			print("  Attack interval: ", new_interval, "s")
+
+	# Create duration timer (3 seconds)
+	var duration_timer = Timer.new()
+	duration_timer.name = "AbilityDurationTimer"
+	duration_timer.wait_time = 3.0
+	duration_timer.one_shot = true
+	duration_timer.timeout.connect(func():
+		end_alpha_strike(unit)
+	)
+	unit["container"].add_child(duration_timer)
+	duration_timer.start()
+
+	print("  Duration: 3 seconds")
+
+func end_alpha_strike(unit: Dictionary):
+	"""End Alpha Strike ability - restore normal attack speed"""
+	if unit.is_empty() or not is_instance_valid(unit.get("container")):
+		return
+
+	print(">>> Alpha Strike ended for ", unit.get("type", "unknown"), " <<<")
+
+	# Restore original attack speed
+	if unit.has("original_attack_speed"):
+		unit["stats"]["attack_speed"] = unit["original_attack_speed"]
+		unit.erase("original_attack_speed")
+
+	# Clear ability active flag (re-enable energy generation)
+	unit["ability_active"] = false
+
+	# Update the attack timer
+	if unit.has("container"):
+		var container = unit["container"]
+		var attack_timer = container.get_node_or_null("AttackTimer")
+		if attack_timer:
+			var new_interval = 1.0 / unit["stats"]["attack_speed"]
+			attack_timer.wait_time = new_interval
+			print("  Attack speed restored to: ", unit["stats"]["attack_speed"])
+
+		# Clean up duration timer
+		var duration_timer = container.get_node_or_null("AbilityDurationTimer")
+		if duration_timer:
+			duration_timer.queue_free()
+
+func end_active_ability(unit: Dictionary):
+	"""General function to end any active ability on a unit"""
+	if unit.is_empty() or not unit.get("ability_active", false):
+		return
+
+	var ability_function = unit.get("ability_function", "")
+
+	# Call the appropriate end function based on ability type
+	if ability_function == "execute_alpha_strike":
+		end_alpha_strike(unit)
+	# Add other ability end functions here as they're implemented
+	else:
+		# Generic cleanup for unknown abilities
+		print("Ending unknown ability: ", ability_function)
+		unit["ability_active"] = false
+		unit.erase("original_attack_speed")
+
+		# Clean up duration timer
+		if unit.has("container"):
+			var container = unit["container"]
+			var duration_timer = container.get_node_or_null("AbilityDurationTimer")
+			if duration_timer:
+				duration_timer.queue_free()
 
 # Health bar functions
 

@@ -33,7 +33,7 @@ A topdown auto battler card game combining elements from Slay the Spire and FTL.
   - Idle behavior: ships drift backward slowly (10px over 8s), then return to position
   - Ships rotate to face enemy spawner when idle
   - Ship sizes: Interceptor (20px), Fighter (36px), Frigate (48px)
-- **Combat Flow**:
+- **Combat Setup**:
   - Ship selection via deployment panel INTERMEDIARY STEP FOR NOW
   - Click lane to deploy selected ship
   - Ships animate from mothership to lane position

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "gdai-mcp-godot": {
+      "command": "uv",
+      "args": [
+        "run",
+        "/home/mrdangerous/any-type-4/addons/gdai-mcp-plugin-godot/gdai_mcp_server.py"
+      ]
+    }
+  }
+}

@@ -19,7 +19,6 @@ config/icon="res://icon.svg"
 
 DataManager="*res://scripts/DataManager.gd"
 GameData="*res://scripts/GameData.gd"
-ShipDatabase="*res://scripts/ShipDatabase.gd"
 CombatConstants="*res://scripts/CombatConstants.gd"
 
 [rendering]

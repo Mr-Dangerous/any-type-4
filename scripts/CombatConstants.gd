@@ -23,9 +23,19 @@ const PLAYER_DEPLOY_COLS = [0, 1, 2, 3]  # Columns 0-3 for player deployment
 const ENEMY_DEPLOY_COLS = [12, 13, 14, 15]  # Columns 12-15 for enemy deployment (last 4 columns)
 
 # Turret constants
-const TURRET_X_OFFSET = 180.0  # Slightly in front of mothership
+const NUM_TURRET_ROWS = 5  # Matches GRID_ROWS - one turret per row per lane
+const TURRET_X_OFFSET = 180.0  # X position for player turrets
+const ENEMY_TURRET_X_OFFSET = 920.0  # X position for enemy turrets
 const TURRET_SIZE = 50  # Turrets are larger than regular ships
-const SECONDARY_TURRET_X_OFFSET = 280
+const SECONDARY_TURRET_X_OFFSET = 280  # Legacy constant (deprecated)
+
+# Mothership and Boss constants
+const MOTHERSHIP_ARMOR = 1000
+const MOTHERSHIP_SHIELD = 500
+const MOTHERSHIP_SIZE = 100
+const BOSS_ARMOR = 1500
+const BOSS_SHIELD = 750
+const BOSS_SIZE = 120
 
 # Ship size classes (width in pixels)
 const SIZE_TINY = 20  # 32-48 range, using middle value
