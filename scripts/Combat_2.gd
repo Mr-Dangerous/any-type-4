@@ -1729,7 +1729,11 @@ func deploy_ship_to_lane(ship_type: String, lane_index: int):
 		# Ability data
 		"ability_function": db_ship_data.get("ability_function", ""),
 		"ability_name": db_ship_data.get("ability", ""),
-		"ability_description": db_ship_data.get("ability_description", "")
+		"ability_description": db_ship_data.get("ability_description", ""),
+
+		# Ability stack/queue system
+		"ability_stack": [],  # Queue of abilities to execute
+		"is_processing_abilities": false  # True while executing abilities from stack
 	}
 
 	# Mark grid cell as occupied
@@ -1832,7 +1836,11 @@ func deploy_enemy_to_lane(enemy_type: String, lane_index: int):
 		# Ability data
 		"ability_function": db_enemy_data.get("ability_function", ""),
 		"ability_name": db_enemy_data.get("abilty", ""),
-		"ability_description": db_enemy_data.get("ability_description", "")
+		"ability_description": db_enemy_data.get("ability_description", ""),
+
+		# Ability stack/queue system
+		"ability_stack": [],  # Queue of abilities to execute
+		"is_processing_abilities": false  # True while executing abilities from stack
 	}
 
 	# Mark grid cell as occupied
@@ -4111,6 +4119,12 @@ func auto_attack_cycle(attacker: Dictionary, target: Dictionary, attack_interval
 			await get_tree().create_timer(0.1).timeout
 			continue
 
+		# Block autoattack while processing ability stack
+		if attacker.get("is_processing_abilities", false):
+			# Wait for abilities to finish processing
+			await get_tree().create_timer(0.1).timeout
+			continue
+
 		# Check if target is still assigned and valid
 		var current_target = attacker.get("auto_target")
 		if current_target != target or not is_instance_valid(target.get("container")):
@@ -4304,18 +4318,123 @@ func cast_ability(unit: Dictionary):
 	print("Function: ", ability_function)
 	print("====================")
 
-	# Show visual notification of ability cast
-	show_ability_notification(unit, ability_name)
-
 	# Reset energy to 0
 	unit["current_energy"] = 0
 	update_energy_bar(unit)
 
-	# Call the ability function dynamically
-	if ability_function != "" and has_method(ability_function):
+	# Check if ability is a card effect (execute_*)
+	var ability_func_lower = ability_function.to_lower()
+	if ability_func_lower.begins_with("execute_"):
+		# This is a card effect - queue it to the ability stack
+		var normalized_function = normalize_card_function_name(ability_function) + "_Effect"
+
+		# Create ability data for queue
+		var ability_data = {
+			"ability_name": ability_name,
+			"ability_function": normalized_function,
+			"source": "ship_energy"  # From ship energy, not a card
+		}
+
+		# Queue the ability on this unit
+		queue_ability_for_ship(unit, ability_data)
+	elif ability_function != "" and has_method(ability_function):
+		# Other ability types - call directly
 		call(ability_function, unit)
 	else:
 		print("WARNING: Ability function not found: ", ability_function)
+
+func normalize_card_function_name(function_name: String) -> String:
+	"""Normalize function names to match CardEffects naming convention"""
+	# Convert "execute_missile_lock" to "execute_Missile_Lock"
+	var parts = function_name.split("_")
+	if parts.size() < 2:
+		return function_name
+
+	# Keep "execute" as is, capitalize first letter of each word after
+	var result = parts[0]
+	for i in range(1, parts.size()):
+		var word = parts[i]
+		if word.length() > 0:
+			result += "_" + word.capitalize()
+
+	return result
+
+# ============================================================================
+# ABILITY STACK/QUEUE SYSTEM
+# ============================================================================
+
+func queue_ability_for_ship(ship: Dictionary, ability_data: Dictionary):
+	"""Add an ability to a ship's execution queue"""
+	if ship.is_empty() or not ship.has("ability_stack"):
+		print("ERROR: Invalid ship for ability queue")
+		return
+
+	ship["ability_stack"].append(ability_data)
+	print("Queued ability '", ability_data.get("ability_name", "unknown"), "' for ", ship.get("type", "unknown"))
+
+	# Start processing if not already processing
+	if not ship.get("is_processing_abilities", false):
+		process_ability_stack(ship)
+
+func process_ability_stack(ship: Dictionary):
+	"""Process all abilities in a ship's queue with delays"""
+	if ship.is_empty() or not ship.has("ability_stack"):
+		return
+
+	# Mark as processing
+	ship["is_processing_abilities"] = true
+
+	# Process abilities one by one
+	while ship["ability_stack"].size() > 0:
+		var ability_data = ship["ability_stack"].pop_front()
+
+		print("Processing ability: ", ability_data.get("ability_name", "unknown"))
+
+		# Execute the ability
+		execute_queued_ability(ship, ability_data)
+
+		# Wait 0.5 seconds before next ability
+		await get_tree().create_timer(0.5).timeout
+
+		# Validate ship still exists
+		if not is_instance_valid(ship.get("container")):
+			break
+
+	# Mark as done processing
+	ship["is_processing_abilities"] = false
+	print(ship.get("type", "unknown"), " finished processing ability stack")
+
+func execute_queued_ability(ship: Dictionary, ability_data: Dictionary):
+	"""Execute a single queued ability"""
+	var ability_name = ability_data.get("ability_name", "")
+	var ability_function = ability_data.get("ability_function", "")
+
+	print("Executing queued ability: ", ability_name, " (", ability_function, ")")
+
+	# Show notification
+	show_ability_notification(ship, ability_name)
+
+	# Get the target using gamma targeting
+	var target = targeting_system.select_target_for_unit(ship, "gamma")
+
+	if not target or target.is_empty():
+		print("Ability fizzled - no valid target")
+		# Still consume the time (already handled by 0.5s delay)
+		return
+
+	# Execute the ability effect
+	if ability_function.begins_with("execute_"):
+		# This is a card effect - use CardEffects
+		var success = await CardEffects.execute_card_effect(ability_function, target, self)
+		if success:
+			# Add to discard if it's a card ability
+			CardHandManager.discard_card(ability_name)
+			print("Ability executed successfully: ", ability_name)
+		else:
+			print("Ability execution failed: ", ability_name)
+	else:
+		# Other ability types
+		print("WARNING: Unknown ability type: ", ability_function)
 
 func show_ability_notification(unit: Dictionary, ability_name: String):
 	"""Display floating text notification when ability is cast"""

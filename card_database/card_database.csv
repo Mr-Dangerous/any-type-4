@@ -1,5 +1,6 @@
-card_name,card_type,card_description,card_function,rarity,sprite_path,target_type
-Strike,Tactical Command,Target ship gains +50% attack speed,execute_Strike,Common,res://assets/Icons/Strike_card_icon.png,friendly_ship
-Shield,Tactical Command,Target ship gains 30 shields,execute_Shield,Common,res://assets/Icons/Shield_card_icon.png,friendly_ship
-Energy Alpha,Power Plant,Target ship gains 100 energy,execute_Energy_Alpha,Common,res://assets/Icons/Energy_Alpha_card_icon.png,friendly_ship
-Turret Blast,Turret,Activate a turret ability.,execute_Turret_Blast,Common,res://assets/Icons/Turret_Blast_card_icon.png,friendly_turret
+card_name,card_type,card_description,card_function,rarity,sprite_path,target_type,projectile_sprite_path,projectile size
+Strike,Tactical Command,Target ship gains +50% attack speed,execute_Strike,Common,res://assets/Icons/Strike_card_icon.png,friendly_ship,,
+Shield,Tactical Command,Target ship gains 30 shields,execute_Shield,Common,res://assets/Icons/Shield_card_icon.png,friendly_ship,,
+Energy Alpha,Power Plant,Target ship gains 100 energy,execute_Energy_Alpha,Common,res://assets/Icons/Energy_Alpha_card_icon.png,friendly_ship,,
+Turret Blast,Turret,Activate a turret ability.,execute_Turret_Blast,Common,res://assets/Icons/Turret_Blast_card_icon.png,friendly_turret,,
+Missile Lock,Ship Ability,Launch a missile that deals 50 explosive damage.,execute_Missile_Lock,Common,res://assets/Effects/s_fxProjectile_2_drone/s_fxProjectile_2_drone.png,friendly_ship,res://assets/Effects/s_fxProjectile_2_drone/s_fxProjectile_2_drone.png,70

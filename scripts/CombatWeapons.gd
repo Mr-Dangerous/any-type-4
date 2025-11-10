@@ -310,5 +310,43 @@ func cast_ability(unit: Dictionary):
 	if combat_manager.has_method("update_energy_bar"):
 		combat_manager.update_energy_bar(unit)
 
-	# TODO: Actually call the ability function when implemented
-	# For now just print to console
+	# Check if ability creates a card (like Missile Lock)
+	# Card abilities from ship database need special handling
+	var ability_func_lower = ability_function.to_lower()
+	if ability_func_lower.begins_with("execute_"):
+		# This is a card effect function - queue it to the ability stack
+		# Normalize the function name to match CardEffects (which uses proper case)
+		# e.g., "execute_missile_lock" -> "execute_Missile_Lock_Effect"
+		var normalized_function = normalize_card_function_name(ability_function) + "_Effect"
+
+		# Create ability data for queue
+		var ability_data = {
+			"ability_name": ability_name,
+			"ability_function": normalized_function,
+			"source": "ship_energy"  # This was from ship energy, not a card
+		}
+
+		# Queue the ability on this ship
+		if combat_manager and combat_manager.has_method("queue_ability_for_ship"):
+			combat_manager.queue_ability_for_ship(unit, ability_data)
+		else:
+			print("CombatWeapons: Combat manager missing queue_ability_for_ship method")
+	else:
+		# TODO: Handle other ability types
+		print("CombatWeapons: Ability function not yet implemented: ", ability_function)
+
+func normalize_card_function_name(function_name: String) -> String:
+	"""Normalize function names to match CardEffects naming convention"""
+	# Convert "execute_missile_lock" to "execute_Missile_Lock"
+	var parts = function_name.split("_")
+	if parts.size() < 2:
+		return function_name
+
+	# Keep "execute" as is, capitalize first letter of each word after
+	var result = parts[0]
+	for i in range(1, parts.size()):
+		var word = parts[i]
+		if word.length() > 0:
+			result += "_" + word.capitalize()
+
+	return result
