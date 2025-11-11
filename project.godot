@@ -17,6 +17,7 @@ config/icon="res://icon.svg"
 
 [autoload]
 
+SeedManager="*res://scripts/SeedManager.gd"
 DataManager="*res://scripts/DataManager.gd"
 GameData="*res://scripts/GameData.gd"
 CombatConstants="*res://scripts/CombatConstants.gd"

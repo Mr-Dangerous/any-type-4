@@ -58,7 +58,7 @@ func initialize_deck():
 
 func shuffle_deck():
 	"""Shuffle the draw pile"""
-	draw_pile.shuffle()
+	SeedManager.shuffle_array(draw_pile)
 	print("CardHandManager: Deck shuffled")
 
 func draw_card() -> bool:

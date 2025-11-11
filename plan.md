@@ -67,15 +67,17 @@ TODO: The  UI has two additionlal resources, needs a proper window, and also nee
   - `/card_database/` - CSV files
 - [x] Set up project settings (resolution, window mode, etc.)
 - [x] Create autoload singletons:
+  - `SeedManager.gd` - Deterministic RNG for procedural generation ✓
+  - `DataManager.gd` - Centralized CSV loading ✓
   - `GameData.gd` - Overall game state and resource management ✓
-  - `ShipDatabase.gd` - Ship data loading from CSV ✓
+  - `CombatConstants.gd` - Combat constants and resource preloads ✓
+  - `CardHandManager.gd` - Card system management ✓
 - [ ] Future singletons:
-  - `DataManager.gd` - Centralized CSV loading (if needed)
   - `EventBus.gd` - Signal hub for inter-scene communication
 
 ### 1.2 Data Management System
 - [x] Create CSV structure for:
-  - `starting_deck.csv` - Starting deck composition (deprecated with card system)
+  - `starting_deck.csv` - Starting deck composition
   - `enemies.csv` - Enemy types and stats (deprecated, see ship_database.csv)
   - `star_names.csv` - Procedural star name generation
   - `ship_database.csv` - Ship and enemy data (all stats, sprites, properties) ✓
@@ -651,6 +653,70 @@ bg_scroll_speed: 10.0 px/s
 bg_tile_size: 1.0x scale
 ```
 
+#### Seed Manager System
+The **SeedManager** singleton (`SeedManager.gd`) provides deterministic random number generation for reproducible gameplay experiences. It controls procedural generation and progression systems but **does not** control real-time combat RNG.
+
+**Purpose**:
+- Enable challenge runs with specific seeds
+- Allow sharing of interesting map configurations
+- Support deterministic testing and debugging
+- Ensure same seed = same starmap/encounters/progression
+
+**Implementation**:
+- Autoload singleton with `RandomNumberGenerator` instance
+- Single global seed controls all deterministic systems
+- Auto-generates seed on startup (using system time)
+- Supports manual seed input for challenge runs
+- Seed persistence through `GameData.save_seed()`/`get_seed()`
+
+**RNG Methods**:
+```gdscript
+SeedManager.initialize_seed(seed_value)  # Set specific seed
+SeedManager.generate_new_seed()          # Generate random seed
+SeedManager.randi()                       # Seeded random integer
+SeedManager.randf()                       # Seeded random float
+SeedManager.randi_range(from, to)        # Seeded range integer
+SeedManager.randf_range(from, to)        # Seeded range float
+SeedManager.shuffle_array(array)         # Seeded array shuffle
+SeedManager.pick_random(array)           # Seeded array element
+```
+
+**Systems Using Seed Manager** (Deterministic):
+1. **StarMap.gd** (10+ integration points):
+   - Background star positions, sizes, colors
+   - Node count per column
+   - Node positions and star assignments
+   - Encounter type selection (combat/treasure/mystery/trading/mining)
+   - Star name selection
+   - Exit node selection
+   - Skip connection generation
+   - Candidate shuffling for path generation
+2. **CardHandManager.gd**:
+   - Deck shuffling (starting deck and reshuffles)
+3. **DataManager.gd**:
+   - Random star name selection
+4. **Future Systems** (when implemented):
+   - Hangar encounter generation
+   - Loot/reward tables
+   - Event outcomes
+   - Progression unlocks
+   - Starting deck configuration (via progression system)
+
+**Systems NOT Using Seed Manager** (Non-Deterministic Combat RNG):
+- Critical hit rolls
+- Hit/miss chance calculations
+- Evasion checks
+- Energy generation amounts (2-4 random per attack)
+- Auto-target selection timing
+- Combat floating point calculations
+- Any real-time combat randomness
+
+**Design Philosophy**:
+The seed controls the "journey" (what encounters you face, what loot appears, map layout) but not the "battles" (hit chances, crits, combat outcomes). This ensures:
+- Reproducible runs for challenge/speedrun communities
+- Fair combat that depends on player skill/strategy, not RNG manipulation
+- Different combat outcomes even with same seed (based on tactics/timing)
+
 ### Scene Flow
 ```
 MainMenu (not implemented)
@@ -691,6 +757,7 @@ StarMap → ...
 24. **Grid-Based Movement** - Drag-and-drop ship repositioning with valid move detection
 25. **Turret System** - 5 turrets with lane-specific targeting and combat integration
 26. **Card System (Partial)** - Hand UI, draw mechanics, drag-and-drop targeting, card effects (Strike, Shield, Energy Alpha, Turret Blast)
+27. **Seed Manager System** - Deterministic RNG for starmap, deck shuffling, and progression (combat RNG remains non-deterministic)
 
 ### Immediate Next Steps - ABILITY SYSTEM
 The combat mechanics are solid. Next focus is implementing ship abilities:
@@ -802,11 +869,11 @@ Once abilities work, implement the card system:
 ## Questions Still to Consider
 
 ### Answered ✓
-- ✓ How should ships target enemies in lanes? → Auto-targeting with 3-second switch timer
+- ✓ How should ships target enemies in lanes? → Auto-targeting based on enemy in lane
 - ✓ How are ship stats stored? → CSV database with ShipDatabase singleton
 - ✓ How do resources display? → ResourceUI at top-left with icons
-- ✓ How exactly does damage calculation work? → Hit chance (1.0 - evasion%), crit chance (1.0 - accuracy%), reinforced armor reduces damage
-- ✓ When do ships generate energy vs auto-attack? → Ships generate 2-4 energy per attack, abilities auto-cast at max energy
+- ✓ How exactly does damage calculation work? → Hit chance (1.0 - evasion%), crit chance (1.0 - accuracy%), reinforced armor can negate crits
+- ✓ When do ships generate energy vs auto-attack? → Ships generate 2-4 energy per attack, abilities auto-cast at max energy.  Ships generate 1 energy for each 5% of their max combined health they take
 - ✓ Should we have a turn system or real-time combat? → Turn-based with sequential lane combat
 - ✓ How do ship abilities work? → Energy-based, auto-cast when full (effects TBD)
 - ✓ Should enemies auto-target or use AI behavior? → Auto-targeting same as player ships

@@ -155,16 +155,16 @@ func generate_starfield():
 	for i in range(NUM_STARS):
 		# Random position across 2x width
 		var pos = Vector2(
-			randf() * map_width,
-			randf() * viewport_size.y
+			SeedManager.randf() * map_width,
+			SeedManager.randf() * viewport_size.y
 		)
 
 		# Random size (biased toward smaller stars, with some large bright ones)
-		var size_roll = randf()
+		var size_roll = SeedManager.randf()
 		var size = 2.0 if size_roll < 0.7 else (4.0 if size_roll < 0.9 else 6.0)
 
 		# Random color
-		var color = STAR_COLORS[randi() % STAR_COLORS.size()]
+		var color = STAR_COLORS[SeedManager.randi() % STAR_COLORS.size()]
 
 		# Brightness correlates with size
 		var brightness = size / 6.0
@@ -198,12 +198,12 @@ func load_starfield():
 
 	for i in range(NUM_STARS):
 		var pos = Vector2(
-			randf() * map_width,
-			randf() * viewport_size.y
+			SeedManager.randf() * map_width,
+			SeedManager.randf() * viewport_size.y
 		)
-		var size_roll = randf()
+		var size_roll = SeedManager.randf()
 		var size = 2.0 if size_roll < 0.7 else (4.0 if size_roll < 0.9 else 6.0)
-		var color = STAR_COLORS[randi() % STAR_COLORS.size()]
+		var color = STAR_COLORS[SeedManager.randi() % STAR_COLORS.size()]
 		var brightness = size / 6.0
 		create_star(pos, size, color, brightness)
 
@@ -261,7 +261,7 @@ func generate_network():
 			nodes_in_column = 3
 		# Middle columns (3 to num_columns-3): random number between min and max
 		else:
-			nodes_in_column = randi() % (max_nodes_per_column - min_nodes_per_column + 1) + min_nodes_per_column
+			nodes_in_column = SeedManager.randi() % (max_nodes_per_column - min_nodes_per_column + 1) + min_nodes_per_column
 
 		# Calculate x position range for this column
 		var x_min = column_width * col + column_width * 0.3
@@ -353,7 +353,7 @@ func generate_network():
 			# Assign random star name
 			var star_name = "Unknown"
 			if star_names.size() > 0:
-				star_name = star_names[randi() % star_names.size()]
+				star_name = star_names[SeedManager.randi() % star_names.size()]
 
 			network_nodes.append({
 				"position": node_pos,
@@ -492,8 +492,8 @@ func connect_network_forward():
 			var attempts = 0
 			var skip_added = false
 			while attempts < 20 and not skip_added:
-				var from_idx = randi() % column_nodes.size()
-				var to_idx = randi() % column_nodes.size()
+				var from_idx = SeedManager.randi() % column_nodes.size()
+				var to_idx = SeedManager.randi() % column_nodes.size()
 
 				# Ensure they're not adjacent and not the same
 				if abs(from_idx - to_idx) > 1:
@@ -524,7 +524,7 @@ func connect_network_forward():
 					network_nodes[home_idx]["connections"].append(target_idx)
 			else:
 				# For other columns, select one random exit node that connects to ALL nodes in next column
-				var exit_node_idx = column_nodes[randi() % column_nodes.size()]
+				var exit_node_idx = column_nodes[SeedManager.randi() % column_nodes.size()]
 				network_nodes[exit_node_idx]["is_exit"] = true
 
 				# Connect exit node to ALL nodes in next column
@@ -577,7 +577,7 @@ func connect_path_to_end():
 				candidates.append(i)
 
 		# Try to connect to a random candidate without crossing
-		candidates.shuffle()
+		SeedManager.shuffle_array(candidates)
 		for candidate in candidates:
 			var pos_current = network_nodes[current]["position"]
 			var pos_candidate = network_nodes[candidate]["position"]
@@ -1050,7 +1050,7 @@ func get_random_encounter_type() -> String:
 		return "treasure"  # Default fallback
 
 	# Generate random number from 0 to total
-	var roll = randi() % total
+	var roll = SeedManager.randi() % total
 
 	# Check which type was rolled
 	if roll < combat_spawn_rate:

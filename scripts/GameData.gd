@@ -12,6 +12,10 @@ var has_combat_state: bool = false
 var player_deck: Array[Dictionary] = []
 var has_deck_data: bool = false
 
+# Persistent seed data
+var game_seed: int = 0
+var has_seed: bool = false
+
 # Player resources
 var metal: int = 50
 var crystals: int = 30
@@ -57,6 +61,18 @@ func get_deck() -> Array[Dictionary]:
 func clear_deck():
 	player_deck.clear()
 	has_deck_data = false
+
+func save_seed(seed_value: int):
+	game_seed = seed_value
+	has_seed = true
+	print("Game seed saved: ", game_seed)
+
+func get_seed() -> int:
+	return game_seed
+
+func clear_seed():
+	game_seed = 0
+	has_seed = false
 
 # Resource management
 func add_resource(type: String, amount: int):

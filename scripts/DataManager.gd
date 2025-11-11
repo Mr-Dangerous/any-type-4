@@ -296,7 +296,7 @@ func get_random_star_name() -> String:
 	if not star_names_loaded or star_names.is_empty():
 		return "Unknown Star"
 
-	return star_names[randi() % star_names.size()]
+	return star_names[SeedManager.randi() % star_names.size()]
 
 func get_all_star_names() -> Array[String]:
 	"""Get all star names"""
