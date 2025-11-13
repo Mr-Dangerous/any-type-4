@@ -244,9 +244,11 @@ func on_projectile_hit(projectile: Sprite2D, attacker: Dictionary, target: Dicti
 
 func calculate_damage(attacker: Dictionary, target: Dictionary) -> Dictionary:
 	"""Calculate damage with accuracy/evasion and critical hit mechanics"""
-	var base_damage = attacker.get("stats", {}).get("damage", 0)
-	var accuracy = attacker.get("stats", {}).get("accuracy", 100)
-	var evasion = target.get("stats", {}).get("evasion", 0)
+	var base_damage = attacker["stats"].get("damage", 0)
+	var accuracy = attacker["stats"].get("accuracy", 100)
+	var evasion = target["stats"].get("evasion", 0)
+	
+	print("CombatProjectileManager.calculate_damage: base_damage=", base_damage, " accuracy=", accuracy, " evasion=", evasion)
 
 	# Apply freeze modifier to evasion if active
 	if combat_scene and "status_effect_manager" in combat_scene:
@@ -298,11 +300,19 @@ func apply_damage(target: Dictionary, damage_result: Dictionary) -> Dictionary:
 	var armor_damage = 0
 	var remaining_damage = damage
 	
-	# Apply to shield first
-	if target.get("current_shield", 0) > 0:
-		shield_damage = min(remaining_damage, target["current_shield"])
-		target["current_shield"] -= shield_damage
-		remaining_damage -= shield_damage
+	# Apply to overshield first (if exists)
+	if target.get("current_overshield", 0) > 0:
+		var overshield_damage = min(remaining_damage, target["current_overshield"])
+		target["current_overshield"] -= overshield_damage
+		shield_damage += overshield_damage
+		remaining_damage -= overshield_damage
+	
+	# Apply to shield
+	if remaining_damage > 0 and target.get("current_shield", 0) > 0:
+		var shield_dmg = min(remaining_damage, target["current_shield"])
+		target["current_shield"] -= shield_dmg
+		shield_damage += shield_dmg
+		remaining_damage -= shield_dmg
 	
 	# Apply remaining damage to armor
 	if remaining_damage > 0:
@@ -377,10 +387,9 @@ func show_damage_number(target: Dictionary, damage_result: Dictionary, damage_in
 	combat_scene.add_child(damage_number)
 
 func update_health_bar(target: Dictionary):
-	"""Update target's health bar visual (placeholder)"""
-	# Implementation depends on health bar structure
-	# To be implemented when integrating with Combat_2.gd
-	pass
+	"""Update target's health bar visual"""
+	if combat_scene and combat_scene.has_method("update_health_bar"):
+		combat_scene.update_health_bar(target)
 
 func show_explosion_effect(position: Vector2, size: String = "Low"):
 	"""Display explosion animation at the specified position"""

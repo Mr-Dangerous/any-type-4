@@ -1,7 +1,7 @@
 [gd_scene load_steps=3 format=3 uid="uid://cftiflsfwhu7d"]
 
-[ext_resource type="Script" path="res://scripts/Card.gd" id="1_1a1a1"]
-[ext_resource type="Texture2D" uid="uid://bg2uyduhajlc7" path="res://assets/UI/s_window_frame/s_window_frame.png" id="2_frame"]
+[ext_resource type="Script" uid="uid://bfymyqhmyc4vs" path="res://scripts/Card.gd" id="1_1a1a1"]
+[ext_resource type="Texture2D" uid="uid://cewehoiepiyw2" path="res://assets/UI/s_window/s_window.png" id="2_frame"]
 
 [node name="Card" type="Control"]
 custom_minimum_size = Vector2(120, 180)
@@ -11,7 +11,7 @@ offset_right = 120.0
 offset_bottom = 180.0
 script = ExtResource("1_1a1a1")
 
-[node name="Background" type="NinePatchRect" parent="."]
+[node name="Background" type="TextureRect" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -19,30 +19,26 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 texture = ExtResource("2_frame")
-patch_margin_left = 8
-patch_margin_top = 8
-patch_margin_right = 8
-patch_margin_bottom = 8
-axis_stretch_horizontal = 1
-axis_stretch_vertical = 1
+expand_mode = 1
 
 [node name="Content" type="MarginContainer" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
+offset_top = -10.0
 grow_horizontal = 2
 grow_vertical = 2
+mouse_filter = 2
 theme_override_constants/margin_left = 8
 theme_override_constants/margin_top = 8
 theme_override_constants/margin_right = 8
 theme_override_constants/margin_bottom = 8
-mouse_filter = 2
 
 [node name="VBox" type="VBoxContainer" parent="Content"]
 layout_mode = 2
-theme_override_constants/separation = 0
 mouse_filter = 2
+theme_override_constants/separation = 0
 
 [node name="NameLabel" type="Label" parent="Content/VBox"]
 custom_minimum_size = Vector2(0, 24)

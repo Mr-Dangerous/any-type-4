@@ -71,13 +71,19 @@ func update_visuals():
 	if card_data.is_empty():
 		return
 
+	# Always load and show artwork
+	if artwork_texture:
+		artwork_texture.visible = true
+		var sprite_path = card_data.get("sprite_path", "")
+		if sprite_path != "":
+			var texture = load(sprite_path)
+			if texture:
+				artwork_texture.texture = texture
+
 	if current_display_mode == DisplayMode.SHORT:
-		# Short mode: show only short description
+		# Short mode: show artwork and short description
 		if name_label:
 			name_label.visible = false
-
-		if artwork_texture:
-			artwork_texture.visible = false
 
 		if description_label:
 			description_label.text = card_data.get("card_short_description", "")
@@ -88,14 +94,6 @@ func update_visuals():
 		if name_label:
 			name_label.visible = true
 			name_label.text = card_data.get("card_name", "Unknown")
-
-		if artwork_texture:
-			artwork_texture.visible = true
-			var sprite_path = card_data.get("sprite_path", "")
-			if sprite_path != "":
-				var texture = load(sprite_path)
-				if texture:
-					artwork_texture.texture = texture
 
 		if description_label:
 			description_label.text = card_data.get("card_rules_description", "")
@@ -272,8 +270,9 @@ func show_hover_popup():
 	popup_card.current_display_mode = DisplayMode.FULL
 	popup_card.mouse_filter = Control.MOUSE_FILTER_IGNORE  # Don't intercept mouse
 
-	# Scale up the popup
-	popup_card.scale = Vector2(1.5, 1.5)
+	# Make popup larger by setting custom size (no scaling to avoid fuzzy text)
+	popup_card.custom_minimum_size = Vector2(160, 240)
+	popup_card.size = Vector2(160, 240)
 	popup_card.z_index = 1000  # Very high to appear above everything
 
 	# Add to root canvas layer
@@ -281,9 +280,22 @@ func show_hover_popup():
 	if canvas_layer:
 		canvas_layer.add_child(popup_card)
 
+		# Adjust font sizes and spacing for popup
+		var name_lbl = popup_card.get_node_or_null("Content/VBox/NameLabel")
+		if name_lbl:
+			name_lbl.add_theme_font_size_override("font_size", 12)
+
+		var desc_lbl = popup_card.get_node_or_null("Content/VBox/DescriptionContainer/DescriptionLabel")
+		if desc_lbl:
+			desc_lbl.add_theme_font_size_override("font_size", 9)
+
+		var vbox = popup_card.get_node_or_null("Content/VBox")
+		if vbox:
+			vbox.add_theme_constant_override("separation", 2)
+
 		# Position above the mouse cursor
 		var mouse_pos = get_global_mouse_position()
-		var popup_size = popup_card.size * popup_card.scale
+		var popup_size = popup_card.size
 		# Position centered horizontally, above cursor
 		popup_card.global_position = mouse_pos - Vector2(popup_size.x / 2, popup_size.y + 20)
 

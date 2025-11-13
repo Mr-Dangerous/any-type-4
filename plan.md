@@ -606,10 +606,38 @@ TODO: The  UI has two additionlal resources, needs a proper window, and also nee
   - Repositions to avoid going off-screen
   - Consistent size (200px width, auto height)
 
-### 2.23 NOT YET IMPLEMENTED
+### 2.23 Enemy Pathfinding Alpha ✓ COMPLETED
+- [x] Enemy movement system (enemy_pathfinding_alpha)
+  - Implemented in Combat_2.gd (line 645-698)
+  - Triggers at start of each lane's precombat phase
+  - Enemies move toward player (left/decreasing columns)
+  - Movement distance: up to movement_speed cells (default 2)
+  - Straight-line movement only (same row)
+- [x] Collision detection
+  - Checks each column from current position toward target
+  - Stops movement if player ship encountered
+  - Cannot path around obstacles (alpha version)
+  - Uses existing move_ship_to_cell() for animation
+- [x] Integration with lane transitions
+  - Called in proceed_to_lane_transition() after camera zoom
+  - Executes before "Start Combat" button appears
+  - Happens before player can play cards
+  - Movement flags reset for each lane
+- [x] Movement animation
+  - 0.5 second tween with cubic easing
+  - Ships slide smoothly to new grid position
+  - Grid cells properly updated (free old, occupy new)
+  - Visual feedback with modulate restoration
+- [ ] TODO (Future Improvements):
+  - Pathfinding around obstacles (beta version)
+  - Diagonal movement options
+  - Different movement patterns per enemy type
+  - Movement cost/action point system
+
+### 2.24 NOT YET IMPLEMENTED
 The following systems from the original plan are not yet implemented:
 
-- [ ] Enemy wave system and AI movement
+- [ ] Enemy wave system and spawning
 - [ ] Pilot system
 - [ ] Powerup system
 - [ ] Drone system
@@ -855,6 +883,7 @@ StarMap → ...
 30. **Ability Queue System** - Cards can queue abilities on ships that execute at combat start with proper sequencing
 31. **Cinematic Ability System** - Camera zoom, slow-motion projectiles, card popups, and full-speed release after queue
 32. **Incinerator Cannon Card** - Implemented fire beam projectile with 20 damage + 3 burn stacks
+33. **Enemy Pathfinding Alpha** - Enemies move toward player (left/decreasing columns) at start of each lane precombat phase, up to movement_speed cells, stopping if blocked by player ships
 
 ### Immediate Next Steps - PILOT SYSTEM
 The combat mechanics and card system are solid. Next focus is implementing the pilot system:

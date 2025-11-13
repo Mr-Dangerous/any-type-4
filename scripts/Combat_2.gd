@@ -75,6 +75,9 @@ var debug_button: Button = null
 var player_targeting_mode: String = "gamma"  # "gamma" (row-based), "alpha" (multi-row), or "random"
 var enemy_targeting_mode: String = "gamma"   # "gamma" (row-based), "alpha" (multi-row), or "random"
 
+# Ship tooltip tracking
+var current_tooltip_ship: Dictionary = {}
+
 # ============================================================================
 # MANAGER INITIALIZATION
 # ============================================================================
@@ -118,6 +121,9 @@ func initialize_managers():
 	# Connect signals
 	ship_manager.ship_destroyed.connect(_on_ship_destroyed)
 	projectile_manager.damage_dealt.connect(_on_damage_dealt)
+	status_effect_manager.status_applied.connect(_on_status_applied)
+	status_effect_manager.status_removed.connect(_on_status_removed)
+	status_effect_manager.status_tick.connect(_on_status_tick)
 
 	# Share state references between managers and main
 	# Lanes and grids are now managed by ship_manager
@@ -136,6 +142,10 @@ func _on_ship_destroyed(ship: Dictionary):
 
 func _on_damage_dealt(attacker: Dictionary, target: Dictionary, damage_info: Dictionary):
 	"""Handle damage dealt event from projectile manager"""
+	# Update tooltip if viewing damaged ship
+	if not current_tooltip_ship.is_empty() and current_tooltip_ship == target:
+		show_ship_tooltip(target)
+	
 	if damage_info.get("destroyed", false):
 		# Check if destroyed object is mothership or boss
 		var object_type = target.get("object_type", "")
@@ -147,6 +157,21 @@ func _on_damage_dealt(attacker: Dictionary, target: Dictionary, damage_info: Dic
 		else:
 			# Regular ship destruction
 			ship_manager.destroy_ship(target)
+
+func _on_status_applied(ship: Dictionary, effect_type: String, stacks: int):
+	"""Update tooltip when status effect applied"""
+	if not current_tooltip_ship.is_empty() and current_tooltip_ship == ship:
+		show_ship_tooltip(ship)
+
+func _on_status_removed(ship: Dictionary, effect_type: String):
+	"""Update tooltip when status effect removed"""
+	if not current_tooltip_ship.is_empty() and current_tooltip_ship == ship:
+		show_ship_tooltip(ship)
+
+func _on_status_tick(ship: Dictionary, effect_type: String, damage: int):
+	"""Update tooltip after status effect damage"""
+	if not current_tooltip_ship.is_empty() and current_tooltip_ship == ship:
+		show_ship_tooltip(ship)
 
 func _on_mothership_destroyed():
 	"""Handle player mothership destruction - GAME OVER"""
@@ -641,6 +666,61 @@ func move_ship_to_cell(unit: Dictionary, target_cell: Vector2i):
 	unit["has_moved_this_turn"] = true
 
 	print("Moved ship from (", old_row, ",", old_col, ") to (", new_row, ",", new_col, ")")
+
+func enemy_pathfinding_alpha(lane_index: int):
+	"""
+	ENEMY PATHFINDING ALPHA
+	Move all enemies in the specified lane toward the player (left/decreasing columns).
+	Enemies move up to their movement_speed, stopping if blocked by player ships.
+	This is a simple straight-line movement system with no pathfinding around obstacles.
+	"""
+	print("ENEMY PATHFINDING ALPHA - Moving enemies in lane ", lane_index)
+
+	# Get all enemies in this lane
+	var enemies_in_lane = []
+	for unit in lanes[lane_index]["units"]:
+		if unit.get("is_enemy", false) and unit.get("object_type") == "ship":
+			enemies_in_lane.append(unit)
+
+	if enemies_in_lane.is_empty():
+		print("  No enemies in lane ", lane_index)
+		return
+
+	# Move each enemy
+	for enemy in enemies_in_lane:
+		var current_row = enemy.get("grid_row", -1)
+		var current_col = enemy.get("grid_col", -1)
+		var movement_speed = enemy.get("movement_speed", 2)
+
+		if current_row == -1 or current_col == -1:
+			continue
+
+		# Calculate target column (move left toward player)
+		var target_col = max(0, current_col - movement_speed)
+
+		# Check each column from current toward target for blocking units
+		var furthest_valid_col = current_col
+		for check_col in range(current_col - 1, target_col - 1, -1):
+			# Check if this cell is occupied
+			var cell_contents = lane_grids[lane_index][current_row][check_col]
+
+			if cell_contents != null:
+				# Cell is occupied - check if it's a player unit
+				if cell_contents.get("faction") == "player":
+					# Blocked by player - stop here
+					print("  Enemy at (", current_row, ",", current_col, ") blocked by player at (", current_row, ",", check_col, ")")
+					break
+
+			# Cell is empty or contains non-player unit - we can move here
+			furthest_valid_col = check_col
+
+		# Move enemy if we found a valid position
+		if furthest_valid_col != current_col:
+			var distance_moved = current_col - furthest_valid_col
+			print("  Moving enemy from (", current_row, ",", current_col, ") to (", current_row, ",", furthest_valid_col, ") - distance: ", distance_moved)
+			move_ship_to_cell(enemy, Vector2i(current_row, furthest_valid_col))
+		else:
+			print("  Enemy at (", current_row, ",", current_col, ") cannot move (blocked or at limit)")
 
 func setup_mothership():
 	# Create mothership as a targetable combat object
@@ -2240,7 +2320,6 @@ var draw_card_button: Button = null
 var ship_tooltip: Panel = null
 var ship_tooltip_label: RichTextLabel = null
 var tooltip_tween: Tween = null
-var current_tooltip_ship: Dictionary = {}
 
 func setup_ship_tooltip():
 	"""Create the ship tooltip panel"""
@@ -3609,6 +3688,9 @@ func proceed_to_lane_transition(next_lane_index: int, next_phase: String):
 
 	# Zoom to next lane
 	zoom_to_lane(next_lane_index)
+
+	# ENEMY PATHFINDING ALPHA - Move enemies toward player before precombat phase
+	enemy_pathfinding_alpha(next_lane_index)
 
 	# Show button and wait for player
 	waiting_for_combat_start = true

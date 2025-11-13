@@ -48,6 +48,10 @@ static func execute_card_effect(function_name: String, target, combat_scene: Nod
 			return execute_Incinerator_Cannon(target, combat_scene)
 		"execute_Incinerator_Cannon_Effect":
 			return await execute_Incinerator_Cannon_Effect(target, combat_scene)
+		"execute_Shield_Battery":
+			return execute_Shield_Battery(target, combat_scene)
+		"execute_Shield_Battery_Effect":
+			return await execute_Shield_Battery_Effect(target, combat_scene)
 		_:
 			print("CardEffects: Unknown function (not yet implemented): " + function_name)
 			return false
@@ -787,6 +791,181 @@ static func execute_Incinerator_Cannon_Effect(target: Dictionary, combat_scene: 
 			status_manager.apply_burn(enemy_target, burn_stacks)
 			print("CardEffects: Incinerator Cannon - Applied ", burn_stacks, " burn stacks")
 
+	return true
+
+static func execute_Shield_Battery(target, combat_scene: Node) -> bool:
+	"""Queue Shield Battery ability for a friendly ship"""
+	if not target is Dictionary or not target.has("container"):
+		print("CardEffects: Shield Battery - Invalid target")
+		return false
+	
+	# Validate target is a friendly ship
+	var is_enemy = target.get("is_enemy", true)
+	if is_enemy:
+		print("CardEffects: Shield Battery - Target must be friendly")
+		return false
+	
+	if not target.has("ability_stack"):
+		print("CardEffects: Shield Battery - Target has no ability_stack")
+		return false
+	
+	var ship_name = target.get("type", "Unknown")
+	print("CardEffects: Shield Battery - Queuing for ", ship_name)
+	
+	# Create ability data
+	var ability_data = {
+		"ability_name": "Shield Battery",
+		"ability_function": "execute_Shield_Battery_Effect",
+		"source": "card"
+	}
+	
+	# Queue the ability
+	if combat_scene and combat_scene.has_method("queue_ability_for_ship"):
+		combat_scene.queue_ability_for_ship(target, ability_data)
+	
+	# Show notification
+	show_effect_notification(target, "SHIELD BATTERY QUEUED", Color.CYAN)
+	
+	return true
+
+static func apply_aoe_full_effect(primary_target: Dictionary, base_value: int, aoe_range: int, target_faction: String, effect_type: String, combat_scene: Node) -> Array:
+	"""
+	Apply AoE effect with FULL value (no reduction) to all ships within range.
+	Unlike apply_aoe_effect, this does not reduce effect by distance.
+	
+	Parameters:
+	- primary_target: The ship directly targeted by the card
+	- base_value: The effect value to apply (same for all ships in range)
+	- aoe_range: Maximum Manhattan distance to affect
+	- target_faction: "friendly" or "enemy" - filters which ships to affect
+	- effect_type: Type of effect ("energy", "shield", "damage", etc.)
+	- combat_scene: Reference to combat scene for accessing ships
+	"""
+	var affected_ships = []
+	
+	# Get primary target position
+	var primary_row = primary_target.get("grid_row", -1)
+	var primary_col = primary_target.get("grid_col", -1)
+	
+	if primary_row == -1 or primary_col == -1:
+		print("CardEffects: AoE Full - Primary target has no grid position")
+		return affected_ships
+	
+	# Get all ships
+	var all_ships = []
+	if combat_scene and combat_scene.has_method("get_all_ships"):
+		all_ships = combat_scene.get_all_ships()
+	else:
+		print("CardEffects: AoE Full - Combat scene doesn't have get_all_ships method")
+		return affected_ships
+	
+	# Determine target faction
+	var primary_is_enemy = primary_target.get("is_enemy", false)
+	var looking_for_enemy = primary_is_enemy if (target_faction == "friendly") else (not primary_is_enemy)
+	
+	print("CardEffects: AoE Full - Primary at (", primary_row, ",", primary_col, ") | Range: ", aoe_range, " | Target faction: ", target_faction)
+	
+	# Find and affect ships within range
+	for ship in all_ships:
+		# Skip the primary target (it's already been affected)
+		if ship == primary_target:
+			continue
+		
+		# Check faction
+		if ship.get("is_enemy", false) != looking_for_enemy:
+			continue
+		
+		# Get ship position
+		var ship_row = ship.get("grid_row", -1)
+		var ship_col = ship.get("grid_col", -1)
+		
+		if ship_row == -1 or ship_col == -1:
+			continue
+		
+		# Calculate Manhattan distance
+		var manhattan_dist = abs(ship_row - primary_row) + abs(ship_col - primary_col)
+		
+		# Skip if out of range
+		if manhattan_dist > aoe_range or manhattan_dist == 0:
+			continue
+		
+		print("CardEffects: AoE Full - Affecting ", ship.get("type", "Unknown"), " at distance ", manhattan_dist, " with FULL value ", base_value)
+		
+		# Apply FULL effect (no distance reduction)
+		match effect_type:
+			"shield":
+				apply_shield_effect(ship, base_value, combat_scene)
+			"energy":
+				apply_energy_effect(ship, base_value, combat_scene)
+			"damage":
+				apply_damage_effect(ship, base_value, combat_scene)
+			_:
+				print("CardEffects: AoE Full - Unknown effect type: ", effect_type)
+		
+		affected_ships.append(ship)
+	
+	return affected_ships
+
+static func display_aura_effect(target: Dictionary, combat_scene: Node):
+	"""Display aura effect sprite at target location"""
+	var card_data = DataManager.get_card_data("Shield Battery")
+	var aura_path = card_data.get("aura_sprite_path", "")
+	var aura_size_str = card_data.get("aura_size", "90")
+	var aura_size = int(aura_size_str) if aura_size_str != "" else 90
+	
+	if aura_path == "":
+		print("CardEffects: Display Aura - No aura path specified")
+		return
+	
+	var aura_texture = load(aura_path)
+	if aura_texture == null:
+		print("CardEffects: Failed to load aura texture: ", aura_path)
+		return
+	
+	# Create aura sprite
+	var aura = Sprite2D.new()
+	aura.texture = aura_texture
+	aura.z_index = 10
+	
+	# Scale based on aura_size
+	var texture_height = aura_texture.get_height()
+	var scale_factor = aura_size / float(texture_height) if texture_height > 0 else 1.0
+	aura.scale = Vector2(scale_factor, scale_factor)
+	
+	# Position at target
+	aura.position = target["sprite"].global_position
+	combat_scene.add_child(aura)
+	
+	print("CardEffects: Display Aura - Created aura at ", aura.position, " with scale ", scale_factor)
+	
+	# Fade out animation (1 second visible, then 0.5s fade)
+	var tween = aura.create_tween()
+	tween.tween_property(aura, "modulate:a", 0.0, 0.5).set_delay(1.0)
+	
+	await tween.finished
+	aura.queue_free()
+
+static func execute_Shield_Battery_Effect(target: Dictionary, combat_scene: Node) -> bool:
+	"""Restore 50 shields with AoE(2)Full effect (full effect on all ships within range 2)"""
+	if not target.has("sprite") or not is_instance_valid(target.get("sprite")):
+		print("CardEffects: Shield Battery Effect - Invalid target")
+		return false
+	
+	var shield_amount = 50
+	var ship_name = target.get("type", "Unknown")
+	print("CardEffects: Shield Battery - Applying to ", ship_name)
+	
+	# Apply shield to primary target
+	apply_shield_effect(target, shield_amount, combat_scene)
+	
+	# Apply AoE(2)Full - get all friendly ships within range 2 with FULL effect
+	var affected_ships = apply_aoe_full_effect(target, shield_amount, 2, "friendly", "shield", combat_scene)
+	
+	print("CardEffects: Shield Battery - Affected ", affected_ships.size(), " additional ships")
+	
+	# Display aura effect
+	await display_aura_effect(target, combat_scene)
+	
 	return true
 
 static func execute_Incinerator_Cannon_Effect_Cinematic(source: Dictionary, target: Dictionary, combat_scene: Node) -> bool:
