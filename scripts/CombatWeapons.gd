@@ -4,16 +4,21 @@ extends Node
 # Handles both manual and auto-combat weapon systems
 
 signal weapon_fired(attacker, target)
-signal unit_destroyed(unit)
 
 # Reference to parent Combat_2 node (set by Combat_2._ready())
 var combat_manager: Node2D = null
+
+# Reference to health system (handles damage and health bars)
+var health_system = null
 
 func _init(parent: Node2D = null):
 	combat_manager = parent
 
 func set_combat_manager(parent: Node2D):
 	combat_manager = parent
+
+func set_health_system(system):
+	health_system = system
 
 # ============================================================================
 # WEAPON FIRING FUNCTIONS (Consolidated manual + auto)
@@ -246,96 +251,36 @@ func rotate_to_target(attacker: Dictionary, target: Dictionary):
 # ============================================================================
 
 func calculate_damage(attacker: Dictionary, target: Dictionary) -> int:
-	# Calculate damage from attacker to target
-	# Returns 0 if attack misses, otherwise returns damage amount
+	"""
+	Calculate damage from attacker to target using DamageCalculator utility.
+	Returns 0 if attack misses, otherwise returns damage amount.
 
-	if attacker.is_empty() or target.is_empty():
-		return 0
+	NOTE: This function now delegates to DamageCalculator for consistency.
+	The old implementation had a critical bug where crit chance was inverted!
+	"""
+	var result = DamageCalculator.calculate_damage(attacker, target, combat_manager)
 
-	# Get stats
-	var attacker_accuracy = attacker["stats"].get("accuracy", 0)
-	var attacker_damage = attacker["stats"].get("damage", 0)
-	var target_evasion = target["stats"].get("evasion", 0)
-	var target_reinforced = target["stats"].get("reinforced_armor", 0)
+	# Log results for debugging
+	if result["is_miss"]:
+		print("MISS!")
+	elif result["is_crit"]:
+		print("CRIT! Damage: ", result["damage"])
+	else:
+		var base_damage = attacker["stats"].get("damage", 0) if attacker.has("stats") else 0
+		var reinforced = target["stats"].get("reinforced_armor", 0) if target.has("stats") else 0
+		print("HIT! Damage: ", result["damage"], " (base: ", base_damage, ", armor reduction: ", reinforced, "%)")
 
-	# Hit chance calculation: accuracy / (accuracy + evasion)
-	var hit_chance = 1.0
-	hit_chance -= (target_evasion * 0.01)
-	if hit_chance < 0:
-		hit_chance = 0
-
-	var crit_chance = 1.0 - ((attacker_accuracy) * 0.01)
-	var crit_roll = randf()
-	var critical_hit = false
-	if crit_roll > crit_chance:
-		critical_hit = true
-	if (critical_hit):
-		# it has a chance to negate a crit via a critical hit of its own. so if a ship has 15 reinforced,
-		# then it has a 15% chance to negate any critical hit against it and reduce it to a normal hit
-		print("crit!")
-
-	# Roll for hit/miss
-	var roll = randf()  # Random float between 0.0 and 1.0
-	if roll > hit_chance:
-		print("MISS! (rolled ", roll, " vs hit chance ", hit_chance, ")")
-		return 0  # Attack missed
-
-	# Hit! Calculate damage
-	var base_damage = attacker_damage
-
-	# Apply reinforced armor reduction (reduces damage by %)
-	# reinforced_armor of 10 = 10% damage reduction
-	# reinforced_armor of 50 = 50% damage reduction
-	var damage_multiplier = 1.0 - (float(target_reinforced) / 100.0)
-	damage_multiplier = max(0.0, damage_multiplier)  # Can't go below 0
-
-	var final_damage = int(base_damage * damage_multiplier)
-	if (critical_hit):
-		final_damage *= 2
-	final_damage = max(1, final_damage)  # Always do at least 1 damage on hit
-
-	print("HIT! Damage: ", final_damage, " (base: ", base_damage, ", armor reduction: ", target_reinforced, "%)")
-	return final_damage
+	return result["damage"]
 
 func apply_damage(target: Dictionary, damage: int):
-	# Apply damage to target's shields first, then armor
-	if target.is_empty():
-		return
-
-	var remaining_damage = damage
-
-	# Damage shields first
-	if target.has("current_shield") and target["current_shield"] > 0:
-		var shield_damage = min(target["current_shield"], remaining_damage)
-		target["current_shield"] -= shield_damage
-		remaining_damage -= shield_damage
-		print("  Shield damaged: -", shield_damage, " (", target["current_shield"], " remaining)")
-
-	# Overflow damage goes to armor
-	if remaining_damage > 0 and target.has("current_armor"):
-		var armor_damage = min(target["current_armor"], remaining_damage)
-		target["current_armor"] -= armor_damage
-		print("  Armor damaged: -", armor_damage, " (", target["current_armor"], " remaining)")
-
-	# Update health bar (call back to combat_manager)
-	if combat_manager.has_method("update_health_bar"):
-		combat_manager.update_health_bar(target)
-
-	# Check if ship is destroyed
-	var total_health = target.get("current_armor", 0) + target.get("current_shield", 0)
-	if total_health <= 0:
-		print("  UNIT DESTROYED!")
-		destroy_unit(target)
-
-func destroy_unit(unit: Dictionary):
-	# Destroy a ship or turret when its health reaches 0
-	# This is called by apply_damage(), but final cleanup is delegated to combat_manager
-
-	if unit.is_empty():
-		return
-
-	# Emit signal so combat_manager can handle cleanup
-	unit_destroyed.emit(unit)
+	"""
+	Apply damage to target using the health system.
+	This now delegates to CombatHealthSystem for all damage logic.
+	"""
+	if health_system:
+		health_system.apply_damage(target, damage)
+	else:
+		print("ERROR: CombatWeapons has no health_system reference!")
 
 # ============================================================================
 # ENERGY AND ABILITY SYSTEM

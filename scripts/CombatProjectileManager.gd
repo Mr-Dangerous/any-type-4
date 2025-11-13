@@ -7,6 +7,7 @@ class_name CombatProjectileManager
 # References
 var combat_scene: Node2D = null
 var ship_manager: CombatShipManager = null
+var health_system = null  # CombatHealthSystem reference
 
 # Preloaded resources
 const DamageNumber = preload("res://scripts/DamageNumber.gd")
@@ -19,6 +20,12 @@ func initialize(parent_scene: Node2D, manager: CombatShipManager):
 	"""Initialize projectile manager"""
 	combat_scene = parent_scene
 	ship_manager = manager
+	# Get health system from combat scene
+	if combat_scene.has_node("HealthSystem"):
+		health_system = combat_scene.get_node("HealthSystem")
+		print("CombatProjectileManager: Health system linked")
+	else:
+		print("WARNING: CombatProjectileManager could not find HealthSystem!")
 
 # ============================================================================
 # PROJECTILE FIRING
@@ -243,94 +250,57 @@ func on_projectile_hit(projectile: Sprite2D, attacker: Dictionary, target: Dicti
 # ============================================================================
 
 func calculate_damage(attacker: Dictionary, target: Dictionary) -> Dictionary:
-	"""Calculate damage with accuracy/evasion and critical hit mechanics"""
+	"""
+	Calculate damage with accuracy/evasion and critical hit mechanics.
+	Now delegates to DamageCalculator utility for consistency.
+
+	Returns: {damage: int, is_crit: bool, is_miss: bool}
+
+	NOTE: Old implementation was missing reinforced armor damage reduction!
+	"""
 	var base_damage = attacker["stats"].get("damage", 0)
 	var accuracy = attacker["stats"].get("accuracy", 100)
 	var evasion = target["stats"].get("evasion", 0)
-	
+
 	print("CombatProjectileManager.calculate_damage: base_damage=", base_damage, " accuracy=", accuracy, " evasion=", evasion)
 
-	# Apply freeze modifier to evasion if active
-	if combat_scene and "status_effect_manager" in combat_scene:
-		var status_manager = combat_scene.status_effect_manager
-		if status_manager:
-			evasion *= status_manager.get_freeze_evasion_multiplier(target)
-
-	# Calculate miss chance based on evasion only
-	var miss_chance = clamp(evasion, 0, 95)  # Max 95% evasion
-	
-	# Roll for hit/miss
-	var roll = randi() % 100
-	var is_miss = roll < miss_chance
-	
-	if is_miss:
-		return {
-			"damage": 0,
-			"is_crit": false,
-			"is_miss": true
-		}
-	
-	# Roll for critical hit based on accuracy
-	var crit_chance = clamp(accuracy, 0, 100)
-	var is_crit = (randi() % 100) < crit_chance
-	var final_damage = base_damage
-	
-	if is_crit:
-		final_damage = int(base_damage * 1.5)
-	
-	return {
-		"damage": final_damage,
-		"is_crit": is_crit,
-		"is_miss": false
-	}
+	# Delegate to DamageCalculator - includes reinforced armor, status effects, and correct crit logic
+	return DamageCalculator.calculate_damage(attacker, target, combat_scene)
 
 func apply_damage(target: Dictionary, damage_result: Dictionary) -> Dictionary:
-	"""Apply damage to target's shield/armor"""
+	"""Apply damage to target using health system"""
 	var damage = damage_result.get("damage", 0)
 	var is_miss = damage_result.get("is_miss", false)
-	
+
 	if is_miss:
 		return {
 			"shield_damage": 0,
 			"armor_damage": 0,
+			"overshield_damage": 0,
 			"destroyed": false
 		}
-	
-	var shield_damage = 0
-	var armor_damage = 0
-	var remaining_damage = damage
-	
-	# Apply to overshield first (if exists)
-	if target.get("current_overshield", 0) > 0:
-		var overshield_damage = min(remaining_damage, target["current_overshield"])
-		target["current_overshield"] -= overshield_damage
-		shield_damage += overshield_damage
-		remaining_damage -= overshield_damage
-	
-	# Apply to shield
-	if remaining_damage > 0 and target.get("current_shield", 0) > 0:
-		var shield_dmg = min(remaining_damage, target["current_shield"])
-		target["current_shield"] -= shield_dmg
-		shield_damage += shield_dmg
-		remaining_damage -= shield_dmg
-	
-	# Apply remaining damage to armor
-	if remaining_damage > 0:
-		armor_damage = min(remaining_damage, target.get("current_armor", 0))
-		target["current_armor"] = max(0, target.get("current_armor", 0) - armor_damage)
-	
-	# Update health bar if exists
-	if target.has("health_bar"):
-		update_health_bar(target)
-	
-	# Check if destroyed
-	var destroyed = target.get("current_armor", 0) <= 0
-	
-	return {
-		"shield_damage": shield_damage,
-		"armor_damage": armor_damage,
-		"destroyed": destroyed
-	}
+
+	# Delegate to health system for all damage application
+	if health_system:
+		var damage_breakdown = health_system.apply_damage(target, damage)
+
+		# Check if destroyed
+		var destroyed = not health_system.is_alive(target)
+
+		return {
+			"shield_damage": damage_breakdown.get("shield_damage", 0),
+			"armor_damage": damage_breakdown.get("armor_damage", 0),
+			"overshield_damage": damage_breakdown.get("overshield_damage", 0),
+			"destroyed": destroyed
+		}
+	else:
+		print("ERROR: CombatProjectileManager has no health_system reference!")
+		return {
+			"shield_damage": 0,
+			"armor_damage": 0,
+			"overshield_damage": 0,
+			"destroyed": false
+		}
 
 # ============================================================================
 # VISUAL EFFECTS

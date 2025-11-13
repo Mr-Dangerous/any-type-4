@@ -17,6 +17,9 @@ static func execute_card_effect_cinematic(function_name: String, source, target,
 			return await execute_Incinerator_Cannon_Effect_Cinematic(source, target, combat_scene)
 		"execute_Missile_Lock_Effect":
 			return await execute_Missile_Lock_Effect_Cinematic(source, target, combat_scene)
+		"execute_Shield_Battery_Effect":
+			# Shield Battery doesn't need cinematic treatment - just execute normally
+			return await execute_Shield_Battery_Effect(target, combat_scene)
 		_:
 			print("CardEffects: No cinematic version for: " + function_name)
 			return false

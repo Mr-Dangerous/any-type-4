@@ -8,6 +8,8 @@ var targeting_system: CombatTargetingSystem = null
 var projectile_manager: CombatProjectileManager = null
 var status_effect_manager: CombatStatusEffectManager = null
 var weapon_manager: Node = null  # CombatWeapons
+var health_system = null  # CombatHealthSystem
+var enemy_manager: CombatEnemyManager = null
 
 # Preloaded scenes
 const DamageNumber = preload("res://scripts/DamageNumber.gd")
@@ -56,6 +58,10 @@ var waiting_for_combat_start: bool = false
 # Auto-deploy button
 var auto_deploy_button: Button = null
 
+# Auto-spawn state
+var auto_spawn_enabled: bool = false
+var auto_spawn_button: Button = null
+
 # Combat pause system
 var combat_paused: bool = true  # Start paused in tactical view
 var in_cleanup_phase: bool = false  # True during post-combat cleanup phase
@@ -84,6 +90,12 @@ var current_tooltip_ship: Dictionary = {}
 
 func initialize_managers():
 	"""Initialize the combat manager systems"""
+	# Create health system FIRST (other systems depend on it)
+	var CombatHealthSystem = load("res://scripts/CombatHealthSystem.gd")
+	health_system = CombatHealthSystem.new(self)
+	health_system.name = "HealthSystem"
+	add_child(health_system)
+
 	# Create ship manager
 	ship_manager = CombatShipManager.new()
 	ship_manager.name = "ShipManager"
@@ -116,7 +128,14 @@ func initialize_managers():
 	var CombatWeapons = load("res://scripts/CombatWeapons.gd")
 	weapon_manager = CombatWeapons.new(self)
 	weapon_manager.name = "WeaponManager"
+	weapon_manager.set_health_system(health_system)  # Link weapon manager to health system
 	add_child(weapon_manager)
+
+	# Create enemy manager
+	enemy_manager = CombatEnemyManager.new()
+	enemy_manager.name = "EnemyManager"
+	add_child(enemy_manager)
+	enemy_manager.initialize(self)
 
 	# Connect signals
 	ship_manager.ship_destroyed.connect(_on_ship_destroyed)
@@ -124,6 +143,7 @@ func initialize_managers():
 	status_effect_manager.status_applied.connect(_on_status_applied)
 	status_effect_manager.status_removed.connect(_on_status_removed)
 	status_effect_manager.status_tick.connect(_on_status_tick)
+	health_system.unit_destroyed.connect(_on_unit_destroyed_by_health_system)
 
 	# Share state references between managers and main
 	# Lanes and grids are now managed by ship_manager
@@ -139,6 +159,14 @@ func _on_ship_destroyed(ship: Dictionary):
 	# Clear target references
 	targeting_system.clear_targets_referencing_ship(ship)
 	# Could add more cleanup here
+
+func _on_unit_destroyed_by_health_system(unit: Dictionary):
+	"""Handle unit destruction from health system"""
+	# Delegate to destroy_ship which handles all cleanup
+	if unit.get("faction") == "enemy":
+		destroy_ship(unit)
+	else:
+		destroy_ship(unit)
 
 func _on_damage_dealt(attacker: Dictionary, target: Dictionary, damage_info: Dictionary):
 	"""Handle damage dealt event from projectile manager"""
@@ -280,6 +308,9 @@ func _ready():
 
 	# Setup auto-deploy button
 	setup_auto_deploy_button()
+
+	# Setup auto-spawn button
+	setup_auto_spawn_button()
 
 	# Setup zoom timer label
 	setup_zoom_timer_label()
@@ -776,7 +807,7 @@ func setup_mothership():
 	}
 
 	# Create health bar for mothership
-	create_health_bar(
+	health_system.create_health_bar(
 		mothership_container,
 		CombatConstants.MOTHERSHIP_SIZE,
 		CombatConstants.MOTHERSHIP_SHIELD,
@@ -885,7 +916,7 @@ func create_turret_at_grid_position(lane_index: int, row_index: int, turret_type
 		turrets.append(turret_data)  # Also add to legacy array for compatibility
 
 		# Create health bar
-		create_health_bar(
+		health_system.create_health_bar(
 			turret_container,
 			CombatConstants.TURRET_SIZE,
 			turret_data["current_shield"],
@@ -893,7 +924,7 @@ func create_turret_at_grid_position(lane_index: int, row_index: int, turret_type
 		)
 
 		# Initialize energy bar
-		update_energy_bar(turret_data)
+		health_system.update_energy_bar(turret_data)
 	else:
 		# Create disabled turret placeholder
 		var label = Label.new()
@@ -968,10 +999,10 @@ func create_turret(turret_name: String, turret_type: String, x_pos: float, y_pos
 		turrets.append(turret_data)
 
 		# Create health bar
-		create_health_bar(turret_container, CombatConstants.TURRET_SIZE, turret_data["current_shield"], turret_data["current_armor"])
+		health_system.create_health_bar(turret_container, CombatConstants.TURRET_SIZE, turret_data["current_shield"], turret_data["current_armor"])
 
 		# Initialize energy bar
-		update_energy_bar(turret_data)
+		health_system.update_energy_bar(turret_data)
 	else:
 		# Create disabled turret indicator (sad emoji)
 		var label = Label.new()
@@ -1103,7 +1134,7 @@ func create_enemy_turret_at_grid_position(lane_index: int, row_index: int, turre
 		enemy_turrets.append(turret_data)  # Also add to legacy array for compatibility
 
 		# Create health bar
-		create_health_bar(
+		health_system.create_health_bar(
 			turret_container,
 			CombatConstants.TURRET_SIZE,
 			turret_data["current_shield"],
@@ -1111,7 +1142,7 @@ func create_enemy_turret_at_grid_position(lane_index: int, row_index: int, turre
 		)
 
 		# Initialize energy bar
-		update_energy_bar(turret_data)
+		health_system.update_energy_bar(turret_data)
 	else:
 		# Create disabled turret placeholder
 		var label = Label.new()
@@ -1190,10 +1221,10 @@ func create_enemy_turret(turret_name: String, turret_type: String, x_pos: float,
 	enemy_turrets.append(turret_data)
 
 	# Create health bar
-	create_health_bar(turret_container, CombatConstants.TURRET_SIZE, turret_data["current_shield"], turret_data["current_armor"])
+	health_system.create_health_bar(turret_container, CombatConstants.TURRET_SIZE, turret_data["current_shield"], turret_data["current_armor"])
 
 	# Initialize energy bar
-	update_energy_bar(turret_data)
+	health_system.update_energy_bar(turret_data)
 
 func setup_enemy_boss():
 	# Create enemy boss as a targetable combat object
@@ -1251,7 +1282,7 @@ func setup_enemy_boss():
 	}
 
 	# Create health bar for boss
-	create_health_bar(
+	health_system.create_health_bar(
 		boss_container,
 		CombatConstants.BOSS_SIZE,
 		CombatConstants.BOSS_SHIELD,
@@ -1862,10 +1893,10 @@ func deploy_ship_to_lane(ship_type: String, lane_index: int):
 	lanes[lane_index]["units"].append(ship_data)
 
 	# Create health bar
-	create_health_bar(ship_container, ship_size, ship_data["current_shield"], ship_data["current_armor"])
+	health_system.create_health_bar(ship_container, ship_size, ship_data["current_shield"], ship_data["current_armor"])
 
 	# Initialize energy bar
-	update_energy_bar(ship_data)
+	health_system.update_energy_bar(ship_data)
 	
 	# Add hover detection for tooltip
 	add_ship_hover_detection(ship_container, ship_data)
@@ -1973,10 +2004,10 @@ func deploy_enemy_to_lane(enemy_type: String, lane_index: int):
 	lanes[lane_index]["units"].append(enemy_data)
 
 	# Create health bar
-	create_health_bar(enemy_container, enemy_size, enemy_data["current_shield"], enemy_data["current_armor"])
+	health_system.create_health_bar(enemy_container, enemy_size, enemy_data["current_shield"], enemy_data["current_armor"])
 
 	# Initialize energy bar
-	update_energy_bar(enemy_data)
+	health_system.update_energy_bar(enemy_data)
 	
 	# Add hover detection for tooltip
 	add_ship_hover_detection(enemy_container, enemy_data)
@@ -2121,6 +2152,18 @@ func setup_auto_deploy_button():
 	auto_deploy_button.add_to_group("ui")
 	auto_deploy_button.pressed.connect(_on_auto_deploy_pressed)
 	add_child(auto_deploy_button)
+
+func setup_auto_spawn_button():
+	# Create auto-spawn button
+	auto_spawn_button = Button.new()
+	auto_spawn_button.name = "AutoSpawnButton"
+	auto_spawn_button.text = "AUTO SPAWN: OFF"
+	auto_spawn_button.position = Vector2(0, 500)  # Below auto-deploy button
+	auto_spawn_button.size = Vector2(250, 50)
+	auto_spawn_button.add_theme_font_size_override("font_size", 18)
+	auto_spawn_button.add_to_group("ui")
+	auto_spawn_button.pressed.connect(_on_auto_spawn_toggled)
+	add_child(auto_spawn_button)
 
 func setup_debug_ui():
 	# Create debug button (bottom-left corner, always visible)
@@ -2566,6 +2609,17 @@ func _on_auto_deploy_pressed():
 
 	print("Auto-deploy complete!")
 
+func _on_auto_spawn_toggled():
+	"""Toggle auto-spawn mode on/off"""
+	auto_spawn_enabled = not auto_spawn_enabled
+
+	if auto_spawn_enabled:
+		auto_spawn_button.text = "AUTO SPAWN: ON"
+		print("Auto-spawn ENABLED - enemies will spawn automatically each turn")
+	else:
+		auto_spawn_button.text = "AUTO SPAWN: OFF"
+		print("Auto-spawn DISABLED - manual enemy deployment only")
+
 func zoom_to_lane(lane_index: int):
 	# Zoom camera to focus on specific lane
 	print("Zooming to lane ", lane_index)
@@ -2901,7 +2955,7 @@ func on_laser_hit(laser: Sprite2D):
 		continue_laser_off_screen(laser)
 	elif damage_result["damage"] > 0:
 		# HIT - Apply damage and show damage numbers
-		var damage_breakdown = apply_damage(selected_target, damage_result["damage"])
+		var damage_breakdown = health_system.apply_damage(selected_target, damage_result["damage"])
 
 		# Show damage numbers for shield and armor damage
 		if damage_breakdown["shield_damage"] > 0:
@@ -2962,123 +3016,44 @@ func continue_laser_off_screen(laser: Sprite2D):
 	)
 
 func calculate_damage(attacker: Dictionary, target: Dictionary) -> Dictionary:
-	# Calculate damage from attacker to target
-	# Returns dictionary with: {damage: int, is_crit: bool, is_miss: bool}
+	"""
+	Calculate damage from attacker to target using DamageCalculator utility.
+	Returns dictionary with: {damage: int, is_crit: bool, is_miss: bool}
 
-	var result = {"damage": 0, "is_crit": false, "is_miss": false}
+	NOTE: This function now delegates to DamageCalculator for consistency.
+	The old implementation had a critical bug where crit chance was inverted!
+	Higher accuracy should INCREASE crit chance, not decrease it.
+	"""
+	var result = DamageCalculator.calculate_damage(attacker, target, self)
 
-	if attacker.is_empty() or target.is_empty():
-		return result
+	# Log results for debugging
+	if result["is_miss"]:
+		print("MISS!")
+	elif result["is_crit"]:
+		print("CRIT! Damage: ", result["damage"])
+	else:
+		var base_damage = attacker["stats"].get("damage", 0) if attacker.has("stats") else 0
+		var reinforced = target["stats"].get("reinforced_armor", 0) if target.has("stats") else 0
+		print("HIT! Damage: ", result["damage"], " (base: ", base_damage, ", armor reduction: ", reinforced, "%)")
 
-	# Get stats
-	var attacker_accuracy = attacker["stats"].get("accuracy", 0)
-	var attacker_damage = attacker["stats"].get("damage", 0)
-	var target_evasion = target["stats"].get("evasion", 0)
-	var target_reinforced = target["stats"].get("reinforced_armor", 0)
-
-	# Hit chance calculation
-	var hit_chance = 1.0
-	hit_chance -= (target_evasion * 0.01)
-	if hit_chance < 0:
-		hit_chance = 0
-
-	# Crit chance calculation
-	var crit_chance = 1.0 - (attacker_accuracy * 0.01)
-	var crit_roll = randf()
-	var critical_hit = false
-	if crit_roll > crit_chance:
-		critical_hit = true
-		result["is_crit"] = true
-
-	# Roll for hit/miss
-	var roll = randf()
-	if roll > hit_chance:
-		print("MISS! (rolled ", roll, " vs hit chance ", hit_chance, ")")
-		result["is_miss"] = true
-		return result
-
-	# Hit! Calculate damage
-	var base_damage = attacker_damage
-
-	# Apply reinforced armor reduction
-	var damage_multiplier = 1.0 - (float(target_reinforced) / 100.0)
-	damage_multiplier = max(0.0, damage_multiplier)
-
-	var final_damage = int(base_damage * damage_multiplier)
-	if critical_hit:
-		final_damage *= 2
-		print("CRIT!")
-	final_damage = max(1, final_damage)  # Always do at least 1 damage on hit
-
-	result["damage"] = final_damage
-	print("HIT! Damage: ", final_damage, " (base: ", base_damage, ", armor reduction: ", target_reinforced, "%)")
 	return result
 
-func apply_damage(target: Dictionary, damage: int) -> Dictionary:
-	# Apply damage to target's shields first, then armor
-	# Returns: {shield_damage: int, armor_damage: int}
-	var damage_breakdown = {"shield_damage": 0, "armor_damage": 0}
-
-	if target.is_empty():
-		return damage_breakdown
-
-	var remaining_damage = damage
-
-	# Damage overshield first (temporary shields)
-	if target.has("current_overshield") and target["current_overshield"] > 0:
-		var overshield_damage = min(target["current_overshield"], remaining_damage)
-		target["current_overshield"] -= overshield_damage
-		remaining_damage -= overshield_damage
-		print("  Overshield damaged: -", overshield_damage, " (", target["current_overshield"], " remaining)")
-
-	# Then damage shields
-	if remaining_damage > 0 and target.has("current_shield") and target["current_shield"] > 0:
-		var shield_damage = min(target["current_shield"], remaining_damage)
-		target["current_shield"] -= shield_damage
-		remaining_damage -= shield_damage
-		damage_breakdown["shield_damage"] = shield_damage
-		print("  Shield damaged: -", shield_damage, " (", target["current_shield"], " remaining)")
-
-	# Overflow damage goes to armor
-	if remaining_damage > 0 and target.has("current_armor"):
-		var armor_damage = min(target["current_armor"], remaining_damage)
-		target["current_armor"] -= armor_damage
-		damage_breakdown["armor_damage"] = armor_damage
-		print("  Armor damaged: -", armor_damage, " (", target["current_armor"], " remaining)")
-
-	# Update health bar
-	update_health_bar(target)
-
-	# Generate energy from damage taken (1 energy per 5% of combined health lost)
-	if not target.get("ability_active", false):
-		var max_energy = target.get("stats", {}).get("energy", 0)
-		if max_energy > 0:
-			var max_shield = target.get("stats", {}).get("shield", 0)
-			var max_armor = target.get("stats", {}).get("armor", 0)
-			var max_combined_health = max_shield + max_armor
-
-			if max_combined_health > 0:
-				var total_damage_dealt = damage_breakdown["shield_damage"] + damage_breakdown["armor_damage"]
-				var percent_lost = float(total_damage_dealt) / float(max_combined_health)
-				var energy_gain = floor(percent_lost * 20.0)  # 1 energy per 5% = 20 energy for 100%
-
-				if energy_gain > 0:
-					var current_energy = target.get("current_energy", 0)
-					target["current_energy"] = min(current_energy + energy_gain, max_energy)
-					print("  ", target.get("type", "unknown"), " gained ", energy_gain, " energy from damage (", target["current_energy"], "/", max_energy, ")")
-					update_energy_bar(target)
-
-					# Check if energy is full after damage
-					if target["current_energy"] >= max_energy:
-						cast_ability(target)
-
-	# Check if ship is destroyed
-	var total_health = target.get("current_armor", 0) + target.get("current_shield", 0)
-	if total_health <= 0:
-		print("  SHIP DESTROYED!")
-		destroy_ship(target)
-
-	return damage_breakdown
+# ============================================================================
+# REMOVED: apply_damage() - Now in CombatHealthSystem
+# ============================================================================
+# This function has been REMOVED and moved to scripts/CombatHealthSystem.gd
+#
+# All damage should go through: health_system.apply_damage(target, damage)
+#
+# The health system handles:
+#   - Damage application (overshield → shield → armor)
+#   - Health bar updates
+#   - Energy generation
+#   - Unit destruction
+#
+# If you need to apply damage, use:
+#   health_system.apply_damage(target, damage)
+# ============================================================================
 
 func start_continuous_attack():
 	# Start attack cycle - attacks happen at attack_speed per second
@@ -3410,7 +3385,7 @@ func auto_queue_ship_abilities(lane_index: int):
 					# Queue the ability
 					var ability_data = {
 						"ability_name": ability_name,
-						"ability_function": ability_function,
+						"ability_function": normalize_card_function_name(ability_function) + "_Effect",
 						"source": "ship_energy"
 					}
 					queue_ability_for_ship(unit, ability_data)
@@ -3690,7 +3665,9 @@ func proceed_to_lane_transition(next_lane_index: int, next_phase: String):
 	zoom_to_lane(next_lane_index)
 
 	# ENEMY PATHFINDING ALPHA - Move enemies toward player before precombat phase
-	enemy_pathfinding_alpha(next_lane_index)
+	# NOTE: If auto_spawn is enabled, enemy movement happens at turn start instead
+	if not auto_spawn_enabled:
+		enemy_pathfinding_alpha(next_lane_index)
 
 	# Show button and wait for player
 	waiting_for_combat_start = true
@@ -3721,7 +3698,12 @@ func return_to_tactical_phase():
 
 	# Reset movement flags for all units (new turn)
 	reset_ship_movement_flags()
-	
+
+	# Auto-spawn enemies if enabled (AFTER resetting movement flags, BEFORE drawing cards)
+	if auto_spawn_enabled and enemy_manager:
+		print("Combat_2: Processing turn spawn cycle")
+		enemy_manager.process_turn_spawn_cycle()
+
 	# Draw 3 cards at start of tactical phase
 	print("Combat_2: Drawing 3 cards for tactical phase")
 	for i in range(3):
@@ -3752,7 +3734,7 @@ func dissipate_all_overshields():
 				unit["current_overshield"] = 0
 				
 				# Update health bar
-				update_health_bar(unit)
+				health_system.update_health_bar(unit)
 
 func show_overshield_dissipation_notification(unit: Dictionary, text: String):
 	"""Show a notification that overshield is dissipating"""
@@ -4127,7 +4109,7 @@ func enemy_turret_auto_attack(enemy_turret: Dictionary):
 			enemy_turret["current_energy"] + energy_gain,
 			enemy_turret["stats"].get("starting_energy", 100)
 		)
-		update_energy_bar(enemy_turret)
+		health_system.update_energy_bar(enemy_turret)
 
 		# Check if ability should be cast
 		if enemy_turret["current_energy"] >= enemy_turret["stats"].get("starting_energy", 100):
@@ -4761,7 +4743,7 @@ func auto_on_laser_hit(laser: Sprite2D, attacker: Dictionary, target: Dictionary
 		continue_laser_off_screen(laser)
 	elif damage_result["damage"] > 0:
 		# HIT - Apply damage and show damage numbers
-		var damage_breakdown = apply_damage(target, damage_result["damage"])
+		var damage_breakdown = health_system.apply_damage(target, damage_result["damage"])
 
 		# Show damage numbers for shield and armor damage
 		if damage_breakdown["shield_damage"] > 0:
@@ -4821,7 +4803,7 @@ func gain_energy(unit: Dictionary):
 	print(unit.get("type", "unknown"), " gained ", energy_gain, " energy (", unit["current_energy"], "/", max_energy, ")")
 
 	# Update energy bar
-	update_energy_bar(unit)
+	health_system.update_energy_bar(unit)
 
 	# Check if energy is full
 	if unit["current_energy"] >= max_energy:
@@ -4852,7 +4834,7 @@ func cast_ability(unit: Dictionary):
 
 	# Reset energy to 0
 	unit["current_energy"] = 0
-	update_energy_bar(unit)
+	health_system.update_energy_bar(unit)
 
 	# Check if ability is a card effect (execute_*)
 	var ability_func_lower = ability_function.to_lower()
@@ -4941,7 +4923,7 @@ func process_ability_stack(ship: Dictionary):
 
 	# Reset energy to 0 after processing abilities (prevents re-queueing next turn)
 	ship["current_energy"] = 0
-	update_energy_bar(ship)
+	health_system.update_energy_bar(ship)
 
 	# Mark as done processing
 	ship["is_processing_abilities"] = false
@@ -4997,8 +4979,23 @@ func execute_queued_ability(ship: Dictionary, ability_data: Dictionary):
 		show_ability_notification(ship, ability_name + " FIZZLED")
 		return
 
-	# Get the target using gamma targeting
-	var target = targeting_system.select_target_for_unit(ship, "gamma")
+	# Get the target based on ability_queue_target from card data
+	var card_data = DataManager.get_card_data(ability_name)
+	var queue_target = card_data.get("ability_queue_target", "") if card_data else ""
+
+	var target = null
+	if queue_target == "self":
+		# Ability targets the caster (e.g., Shield Battery, Alpha Strike)
+		target = ship
+		print("  Target: self (casting ship)")
+	elif queue_target == "enemy":
+		# Find an enemy target (e.g., Missile Lock)
+		target = targeting_system.select_target_for_unit(ship, "gamma")
+		print("  Target: enemy (gamma targeting)")
+	else:
+		# Default behavior for backwards compatibility (cards without ability_queue_target)
+		target = targeting_system.select_target_for_unit(ship, "gamma")
+		print("  Target: default (gamma targeting)")
 
 	if not target or target.is_empty():
 		print("Ability fizzled - no valid target")
@@ -5220,10 +5217,27 @@ func end_active_ability(unit: Dictionary):
 			if duration_timer:
 				duration_timer.queue_free()
 
-# Health bar functions
+# ============================================================================
+# DEPRECATED HEALTH FUNCTIONS (Now in CombatHealthSystem)
+# ============================================================================
+# These functions are kept for backwards compatibility but delegate to health_system.
+# All health-related code is now in scripts/CombatHealthSystem.gd
+#
+# To understand how health bars work, see CombatHealthSystem.gd:
+#   - create_health_bar() - Creates the visual bars
+#   - update_health_bar() - Updates bar widths when health changes
+#   - apply_damage() - Applies damage and automatically updates bars
+# ============================================================================
 
 func create_health_bar(ship_container: Control, ship_size: int, max_shield: int, max_armor: int):
-	# Create health bar UI above ship (max 32px wide)
+	# DEPRECATED: This function is kept for backwards compatibility only
+	# All calls have been updated to use health_system.create_health_bar()
+	# The actual implementation is in scripts/CombatHealthSystem.gd
+	print("WARNING: Deprecated create_health_bar() called - use health_system.create_health_bar() instead")
+	health_system.create_health_bar(ship_container, ship_size, max_shield, max_armor)
+
+# OLD IMPLEMENTATION REMOVED - See CombatHealthSystem.gd
+# func create_health_bar_OLD(ship_container: Control, ship_size: int, max_shield: int, max_armor: int):
 	var bar_width = min(32, ship_size)  # Cap at 32 pixels
 	var health_bar_container = Control.new()
 	health_bar_container.name = "HealthBar"
@@ -5273,11 +5287,13 @@ func create_health_bar(ship_container: Control, ship_size: int, max_shield: int,
 func update_health_bar(ship: Dictionary):
 	# Update health bar to reflect current health
 	if not ship.has("container"):
+		print("DEBUG: update_health_bar - no container found")
 		return
 
 	var container = ship["container"]
 	var health_bar_container = container.get_node_or_null("HealthBar")
 	if not health_bar_container:
+		print("DEBUG: update_health_bar - no HealthBar container found")
 		return
 
 	var ship_size = ship["size"]
@@ -5287,17 +5303,25 @@ func update_health_bar(ship: Dictionary):
 	var current_armor = ship.get("current_armor", max_armor)
 	var current_shield = ship.get("current_shield", max_shield)
 
+	print("DEBUG: update_health_bar - bar_width=", bar_width, " max_armor=", max_armor, " current_armor=", current_armor, " max_shield=", max_shield, " current_shield=", current_shield)
+
 	# Update armor bar width
 	var armor_bar = health_bar_container.get_node_or_null("ArmorBar")
 	if armor_bar and max_armor > 0:
 		var armor_percent = float(current_armor) / float(max_armor)
-		armor_bar.size.x = bar_width * armor_percent
+		var new_width = bar_width * armor_percent
+		print("DEBUG: ArmorBar - percent=", armor_percent, " new_width=", new_width, " old size=", armor_bar.size)
+		armor_bar.size = Vector2(new_width, armor_bar.size.y)
+		print("DEBUG: ArmorBar - after setting, size=", armor_bar.size)
 
 	# Update shield bar width
 	var shield_bar = health_bar_container.get_node_or_null("ShieldBar")
 	if shield_bar and max_shield > 0:
 		var shield_percent = float(current_shield) / float(max_shield)
-		shield_bar.size.x = bar_width * shield_percent
+		var new_width = bar_width * shield_percent
+		print("DEBUG: ShieldBar - percent=", shield_percent, " new_width=", new_width, " old size=", shield_bar.size)
+		shield_bar.size = Vector2(new_width, shield_bar.size.y)
+		print("DEBUG: ShieldBar - after setting, size=", shield_bar.size)
 	
 	# Update overshield bar width (scales based on max_shield)
 	var overshield_bar = health_bar_container.get_node_or_null("OvershieldBar")
@@ -5305,14 +5329,15 @@ func update_health_bar(ship: Dictionary):
 		var current_overshield = ship.get("current_overshield", 0)
 		if current_overshield > 0 and max_shield > 0:
 			var overshield_percent = float(current_overshield) / float(max_shield)
-			overshield_bar.size.x = min(bar_width * overshield_percent, bar_width)
+			var overshield_width = min(bar_width * overshield_percent, bar_width)
+			overshield_bar.size = Vector2(overshield_width, overshield_bar.size.y)
 			overshield_bar.visible = true
 		else:
-			overshield_bar.size.x = 0
+			overshield_bar.size = Vector2(0, overshield_bar.size.y)
 			overshield_bar.visible = false
 
 	# Also update energy bar
-	update_energy_bar(ship)
+	health_system.update_energy_bar(ship)
 
 func update_energy_bar(ship: Dictionary):
 	# Update energy bar to reflect current energy
@@ -5334,10 +5359,17 @@ func update_energy_bar(ship: Dictionary):
 	if energy_bar:
 		if max_energy > 0:
 			var energy_percent = float(current_energy) / float(max_energy)
-			energy_bar.size.x = bar_width * energy_percent
+			energy_bar.size = Vector2(bar_width * energy_percent, energy_bar.size.y)
 		else:
 			# No energy system, hide the bar
-			energy_bar.size.x = 0
+			energy_bar.size = Vector2(0, energy_bar.size.y)
+
+func update_ship_display(ship: Dictionary):
+	"""Update ship UI display - called by CardEffects after applying effects"""
+	if health_system:
+		health_system.update_health_bar(ship)
+	else:
+		print("ERROR: update_ship_display called but health_system is null")
 
 # Stat helper functions
 
@@ -5417,8 +5449,23 @@ func execute_queued_ability_cinematic(ship: Dictionary, ability_data: Dictionary
 		await get_tree().create_timer(1.5).timeout
 		return
 
-	# Get the target
-	var target = targeting_system.select_target_for_unit(ship, "gamma")
+	# Get the target based on ability_queue_target from card data
+	var card_data = DataManager.get_card_data(ability_name)
+	var queue_target = card_data.get("ability_queue_target", "") if card_data else ""
+
+	var target = null
+	if queue_target == "self":
+		# Ability targets the caster (e.g., Shield Battery, Alpha Strike)
+		target = ship
+		print("  CINEMATIC Target: self (casting ship)")
+	elif queue_target == "enemy":
+		# Find an enemy target (e.g., Missile Lock)
+		target = targeting_system.select_target_for_unit(ship, "gamma")
+		print("  CINEMATIC Target: enemy (gamma targeting)")
+	else:
+		# Default behavior for backwards compatibility (cards without ability_queue_target)
+		target = targeting_system.select_target_for_unit(ship, "gamma")
+		print("  CINEMATIC Target: default (gamma targeting)")
 
 	if not target or target.is_empty():
 		print("Ability fizzled - no valid target")
