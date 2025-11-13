@@ -6,6 +6,8 @@ extends Node2D
 var ship_manager: CombatShipManager = null
 var targeting_system: CombatTargetingSystem = null
 var projectile_manager: CombatProjectileManager = null
+var status_effect_manager: CombatStatusEffectManager = null
+var weapon_manager: Node = null  # CombatWeapons
 
 # Preloaded scenes
 const DamageNumber = preload("res://scripts/DamageNumber.gd")
@@ -56,8 +58,14 @@ var auto_deploy_button: Button = null
 
 # Combat pause system
 var combat_paused: bool = true  # Start paused in tactical view
+var in_cleanup_phase: bool = false  # True during post-combat cleanup phase
 var zoom_timer: Timer = null
 var zoom_timer_label: Label = null
+
+# Pre-combat check phase UI
+var pre_combat_check_panel: Panel = null
+var pre_combat_confirm_button: Button = null
+var pre_combat_ability_list: VBoxContainer = null
 
 # Idle behavior constants
 
@@ -94,6 +102,18 @@ func initialize_managers():
 	projectile_manager.name = "ProjectileManager"
 	add_child(projectile_manager)
 	projectile_manager.initialize(self, ship_manager)
+
+	# Create status effect manager
+	status_effect_manager = CombatStatusEffectManager.new()
+	status_effect_manager.name = "StatusEffectManager"
+	add_child(status_effect_manager)
+	status_effect_manager.initialize(self)
+
+	# Create weapon manager
+	var CombatWeapons = load("res://scripts/CombatWeapons.gd")
+	weapon_manager = CombatWeapons.new(self)
+	weapon_manager.name = "WeaponManager"
+	add_child(weapon_manager)
 
 	# Connect signals
 	ship_manager.ship_destroyed.connect(_on_ship_destroyed)
@@ -399,6 +419,17 @@ func get_valid_move_cells(unit: Dictionary) -> Array[Vector2i]:
 
 	return valid_cells
 
+func get_all_ships() -> Array:
+	"""Get all ships from all lanes (used for AoE effects)"""
+	var all_ships = []
+
+	for lane in lanes:
+		if lane.has("units"):
+			for unit in lane["units"]:
+				all_ships.append(unit)
+
+	return all_ships
+
 func show_movement_overlay(unit: Dictionary):
 	# Show visual overlays for all cells in the lane
 	# Blue for valid moves, grey for invalid
@@ -615,16 +646,18 @@ func setup_mothership():
 	# Create mothership as a targetable combat object
 	var mothership_container = Control.new()
 	mothership_container.name = "Mothership"
-	mothership_container.position = Vector2(CombatConstants.MOTHERSHIP_X, get_viewport_rect().size.y / 2 - 100)
+	# Position at top of combat area, spanning all lanes
+	var combat_height = CombatConstants.LANE_SPACING * (CombatConstants.NUM_LANES - 1)
+	mothership_container.position = Vector2(CombatConstants.MOTHERSHIP_X, CombatConstants.LANE_Y_START)
 	add_child(mothership_container)
 
-	# Add sprite
+	# Add sprite - stretched vertically to span all lanes
 	var sprite = TextureRect.new()
 	sprite.name = "Sprite"
 	sprite.texture = CombatConstants.MothershipTexture
-	sprite.custom_minimum_size = Vector2(CombatConstants.MOTHERSHIP_SIZE, CombatConstants.MOTHERSHIP_SIZE)
-	sprite.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
-	sprite.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	sprite.custom_minimum_size = Vector2(CombatConstants.MOTHERSHIP_SIZE, combat_height)
+	sprite.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	sprite.stretch_mode = TextureRect.STRETCH_SCALE
 	mothership_container.add_child(sprite)
 
 	# Add label
@@ -1086,16 +1119,18 @@ func setup_enemy_boss():
 	# Create enemy boss as a targetable combat object
 	var boss_container = Control.new()
 	boss_container.name = "EnemyBoss"
-	boss_container.position = Vector2(CombatConstants.ENEMY_SPAWN_X, get_viewport_rect().size.y / 2 - 100)
+	# Position at top of combat area, spanning all lanes
+	var combat_height = CombatConstants.LANE_SPACING * (CombatConstants.NUM_LANES - 1)
+	boss_container.position = Vector2(CombatConstants.ENEMY_SPAWN_X, CombatConstants.LANE_Y_START)
 	add_child(boss_container)
 
-	# Add sprite (using elite enemy texture for now)
+	# Add sprite (using elite enemy texture for now) - stretched vertically to span all lanes
 	var sprite = TextureRect.new()
 	sprite.name = "Sprite"
 	sprite.texture = CombatConstants.EliteTexture
-	sprite.custom_minimum_size = Vector2(CombatConstants.BOSS_SIZE, CombatConstants.BOSS_SIZE)
-	sprite.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
-	sprite.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	sprite.custom_minimum_size = Vector2(CombatConstants.BOSS_SIZE, combat_height)
+	sprite.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	sprite.stretch_mode = TextureRect.STRETCH_SCALE
 	sprite.flip_h = true  # Flip to face left
 	boss_container.add_child(sprite)
 
@@ -1733,7 +1768,11 @@ func deploy_ship_to_lane(ship_type: String, lane_index: int):
 
 		# Ability stack/queue system
 		"ability_stack": [],  # Queue of abilities to execute
-		"is_processing_abilities": false  # True while executing abilities from stack
+		"is_processing_abilities": false,  # True while executing abilities from stack
+
+		# Status effects and elemental damage
+		"status_effects": [],  # Array of active status effects (burn, freeze, etc.)
+		"damage_types": []  # Array of elemental damage types (fire, ice, acid, etc.)
 	}
 
 	# Mark grid cell as occupied
@@ -1840,7 +1879,11 @@ func deploy_enemy_to_lane(enemy_type: String, lane_index: int):
 
 		# Ability stack/queue system
 		"ability_stack": [],  # Queue of abilities to execute
-		"is_processing_abilities": false  # True while executing abilities from stack
+		"is_processing_abilities": false,  # True while executing abilities from stack
+
+		# Status effects and elemental damage
+		"status_effects": [],  # Array of active status effects (burn, freeze, etc.)
+		"damage_types": []  # Array of elemental damage types (fire, ice, acid, etc.)
 	}
 
 	# Mark grid cell as occupied
@@ -2195,7 +2238,7 @@ var draw_card_button: Button = null
 
 # Ship tooltip UI
 var ship_tooltip: Panel = null
-var ship_tooltip_label: Label = null
+var ship_tooltip_label: RichTextLabel = null
 var tooltip_tween: Tween = null
 var current_tooltip_ship: Dictionary = {}
 
@@ -2223,12 +2266,14 @@ func setup_ship_tooltip():
 	ship_tooltip.add_theme_stylebox_override("panel", style)
 	
 	# Create label for stats
-	ship_tooltip_label = Label.new()
+	ship_tooltip_label = RichTextLabel.new()
 	ship_tooltip_label.name = "StatsLabel"
-	ship_tooltip_label.add_theme_font_size_override("font_size", 11)
-	ship_tooltip_label.add_theme_color_override("font_color", Color.WHITE)
-	ship_tooltip_label.add_theme_constant_override("line_spacing", 2)
-	ship_tooltip_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	ship_tooltip_label.add_theme_font_size_override("normal_font_size", 11)
+	ship_tooltip_label.add_theme_color_override("default_color", Color.WHITE)
+	ship_tooltip_label.add_theme_constant_override("line_separation", 2)
+	ship_tooltip_label.bbcode_enabled = true
+	ship_tooltip_label.fit_content = true
+	ship_tooltip_label.scroll_active = false
 	ship_tooltip.add_child(ship_tooltip_label)
 	
 	# Add to UI layer so it's not affected by camera
@@ -2279,21 +2324,54 @@ func show_ship_tooltip(ship_data: Dictionary):
 	stats_text += "Energy: %d / %d\n" % [ship_data.get("current_energy", 0), ship_data.get("stats", {}).get("energy", 0)]
 	stats_text += "\n"
 	
-	# Combat stats
+	# Combat stats (with temporary modifiers)
 	var stats = ship_data.get("stats", {})
 	stats_text += "Damage: %d\n" % stats.get("damage", 0)
-	stats_text += "Attack Speed: %.1f\n" % stats.get("attack_speed", 0)
+
+	# Attack Speed - show modified value if affected by freeze
+	var base_attack_speed = stats.get("attack_speed", 0)
+	var attack_speed_multiplier = 1.0
+	if status_effect_manager:
+		attack_speed_multiplier = status_effect_manager.get_freeze_attack_speed_multiplier(ship_data)
+
+	if attack_speed_multiplier < 1.0:
+		var modified_attack_speed = base_attack_speed * attack_speed_multiplier
+		stats_text += "Attack Speed: %.1f [color=red](%.1f)[/color]\n" % [base_attack_speed, modified_attack_speed]
+	else:
+		stats_text += "Attack Speed: %.1f\n" % base_attack_speed
+
 	stats_text += "Num Attacks: %d\n" % stats.get("num_attacks", 1)
 	stats_text += "Accuracy: %d%%\n" % stats.get("accuracy", 0)
-	stats_text += "Evasion: %d%%\n" % stats.get("evasion", 0)
+
+	# Evasion - show modified value if affected by freeze
+	var base_evasion = stats.get("evasion", 0)
+	var evasion_multiplier = 1.0
+	if status_effect_manager:
+		evasion_multiplier = status_effect_manager.get_freeze_evasion_multiplier(ship_data)
+
+	if evasion_multiplier < 1.0:
+		var modified_evasion = base_evasion * evasion_multiplier
+		stats_text += "Evasion: %d%% [color=red](%d%%)[/color]\n" % [base_evasion, int(modified_evasion)]
+	else:
+		stats_text += "Evasion: %d%%\n" % base_evasion
+
 	stats_text += "Reinforced: %d\n" % stats.get("reinforced_armor", 0)
 	
 	ship_tooltip_label.text = stats_text
-	
-	# Size tooltip to fit text
+
+	# Size tooltip to fit text (RichTextLabel needs explicit size)
 	await get_tree().process_frame  # Wait for label to calculate size
-	var label_size = ship_tooltip_label.get_combined_minimum_size()
-	ship_tooltip.custom_minimum_size = label_size + Vector2(20, 20)  # Padding
+
+	# Set a reasonable width and let height auto-calculate
+	ship_tooltip_label.custom_minimum_size = Vector2(200, 0)
+	ship_tooltip_label.size = Vector2(200, 0)
+	await get_tree().process_frame  # Wait for RichTextLabel to calculate content height
+
+	var content_size = ship_tooltip_label.get_content_height()
+	ship_tooltip_label.custom_minimum_size = Vector2(200, content_size)
+	ship_tooltip_label.size = Vector2(200, content_size)
+
+	ship_tooltip.custom_minimum_size = Vector2(220, content_size + 20)  # Padding
 	ship_tooltip_label.position = Vector2(10, 10)
 	
 	# Position near mouse
@@ -2470,6 +2548,10 @@ func _on_return_to_tactical():
 	combat_paused = true
 	print("Combat PAUSED - tactical view")
 
+	# Reset status effect manager lane (no active lane in tactical view)
+	if status_effect_manager:
+		status_effect_manager.set_active_lane(-1)
+
 	# Stop combat for the zoomed lane
 	var prev_lane_index = zoomed_lane_index
 	if prev_lane_index != -1:
@@ -2614,6 +2696,22 @@ func start_attack_sequence():
 	# Start continuous attack timer
 	start_continuous_attack()
 
+func calculate_target_position(attacker: Dictionary, target: Dictionary, attacker_center: Vector2) -> Vector2:
+	"""Calculate target position for projectiles.
+	When targeting mothership/boss, fire down the lane (use attacker's Y position).
+	Otherwise, aim at the center of the target."""
+	var target_pos = target["container"].position
+	var target_size = target["size"]
+	var target_type = target.get("object_type", "")
+	
+	# Check if targeting mothership or boss
+	if target_type == "mothership" or target_type == "boss":
+		# Fire down the lane - use attacker's Y position
+		return Vector2(target_pos.x + target_size / 2, attacker_center.y)
+	else:
+		# Normal targeting - aim at center of target
+		return target_pos + Vector2(target_size / 2, target_size / 2)
+
 func rotate_ship_to_target():
 	# Rotate attacker to face the target
 	if selected_attacker.is_empty() or selected_target.is_empty():
@@ -2622,12 +2720,10 @@ func rotate_ship_to_target():
 	var attacker_sprite = selected_attacker["sprite"]
 	var attacker_pos = selected_attacker["container"].position
 	var attacker_size = selected_attacker["size"]
-	var target_pos = selected_target["container"].position
-	var target_size = selected_target["size"]
 
 	# Calculate center positions
 	var attacker_center = attacker_pos + Vector2(attacker_size / 2, attacker_size / 2)
-	var target_center = target_pos + Vector2(target_size / 2, target_size / 2)
+	var target_center = calculate_target_position(selected_attacker, selected_target, attacker_center)
 
 	# Calculate angle to target
 	var direction = target_center - attacker_center
@@ -2640,37 +2736,36 @@ func rotate_ship_to_target():
 	print("Rotating attacker to face target")
 
 func fire_laser():
-	# Fire laser projectiles from attacker to target
-	# Number of projectiles based on ship's num_attacks stat
+	# Fire laser projectiles from attacker to target using consolidated weapon system
 	if selected_attacker.is_empty() or selected_target.is_empty():
 		return
 
-	var num_attacks = selected_attacker["stats"]["num_attacks"]
-	print("Firing ", num_attacks, " projectile(s)")
+	if weapon_manager and weapon_manager.has_method("fire_weapon_volley"):
+		# Rotate attacker to face target first
+		if selected_attacker.has("sprite") and selected_target.has("sprite"):
+			await rotate_attacker_to_target(selected_attacker, selected_target)
 
-	# Fire multiple projectiles with slight spacing
-	for i in range(num_attacks):
-		if i > 0:
-			# Add small delay between projectiles (0.05s)
-			await get_tree().create_timer(0.05).timeout
-		fire_single_laser()
+		# Fire all projectiles simultaneously
+		weapon_manager.fire_weapon_volley(selected_attacker, selected_target)
+	else:
+		print("Combat_2: ERROR - weapon_manager not available for fire_laser")
 
-	# Gain energy after attack (2-4 random)
-	gain_energy(selected_attacker)
+# ============================================================================
+# DEPRECATED FUNCTIONS (use weapon_manager.fire_weapon_volley instead)
+# ============================================================================
 
 func fire_single_laser():
+	# DEPRECATED: Use weapon_manager.fire_weapon_volley instead
 	# Fire a single laser projectile from attacker to target
 	if selected_attacker.is_empty() or selected_target.is_empty():
 		return
 
 	var attacker_pos = selected_attacker["container"].position
 	var attacker_size = selected_attacker["size"]
-	var target_pos = selected_target["container"].position
-	var target_size = selected_target["size"]
 
 	# Calculate center positions
 	var start_pos = attacker_pos + Vector2(attacker_size / 2, attacker_size / 2)
-	var end_pos = target_pos + Vector2(target_size / 2, target_size / 2)
+	var end_pos = calculate_target_position(selected_attacker, selected_target, start_pos)
 
 	# Calculate direction and angle
 	var direction = end_pos - start_pos
@@ -2704,6 +2799,7 @@ func fire_single_laser():
 	tween.tween_callback(on_laser_hit.bind(laser))
 
 func on_laser_hit(laser: Sprite2D):
+	# DEPRECATED: Use weapon_manager.fire_weapon_volley instead
 	# Handle laser reaching target position
 	# If hit: destroy laser and apply damage
 	# If miss: continue traveling until off-screen
@@ -2915,6 +3011,9 @@ func start_continuous_attack():
 	# attack_speed of 0.3 = 0.3 attacks/second = 3.333s per attack
 	# attack_speed of 10 = 10 attacks/second = 0.1s per attack
 	var attack_speed = selected_attacker["stats"]["attack_speed"]
+	# Apply freeze modifier if active
+	if status_effect_manager:
+		attack_speed *= status_effect_manager.get_freeze_attack_speed_multiplier(selected_attacker)
 	var attack_interval = 1.0 / attack_speed
 
 	# Start attack cycle
@@ -2925,10 +3024,13 @@ func start_continuous_attack():
 func attack_cycle(attacker: Dictionary, target: Dictionary, attack_interval: float):
 	# Continuous attack cycle
 	while not attacker.is_empty() and not target.is_empty():
-		# Stop if combat is paused
-		if combat_paused:
-			print("Attack cycle stopped - combat paused")
-			break
+		# Wait while combat is paused (resume when unpaused)
+		while combat_paused:
+			await get_tree().create_timer(0.1).timeout
+			# Check if units still exist while paused
+			if not is_instance_valid(attacker.get("container")) or not is_instance_valid(target.get("container")):
+				print("Attack cycle ended - unit no longer exists")
+				return
 
 		# Check if still attacking same target
 		if selected_attacker != attacker or selected_target != target:
@@ -3110,6 +3212,10 @@ func proceed_to_next_lane():
 		current_turn_phase = "lane_2"
 
 	if target_lane >= 0:
+		# Update status effect manager with active lane
+		if status_effect_manager:
+			status_effect_manager.set_active_lane(target_lane)
+
 		# Ensure combat is paused for precombat phase
 		combat_paused = true
 		print("Combat PAUSED - entering precombat phase for lane ", target_lane)
@@ -3117,14 +3223,16 @@ func proceed_to_next_lane():
 		# Reset movement flags for this lane's precombat phase
 		reset_ship_movement_flags()
 
+		# Set waiting_for_combat_start BEFORE zooming so cards become playable
+		waiting_for_combat_start = true
+
 		# Zoom to the lane
 		zoom_to_lane(target_lane)
 
 		# Update button to "Start Combat"
-		waiting_for_combat_start = true
 		if turn_progression_button:
 			turn_progression_button.text = "Start Combat"
-		
+
 		# Update card system visibility (show hand and draw button)
 		update_card_system_visibility()
 
@@ -3138,20 +3246,229 @@ func start_combat_phase():
 	if is_dragging_ship:
 		cleanup_ship_drag()
 
-	# Hide the button during combat
+	# Hide the "Start Combat" button
 	if turn_progression_button:
 		turn_progression_button.visible = false
 
 	waiting_for_combat_start = false
 
-	# Unpause combat
-	combat_paused = false
-	print("Combat UNPAUSED - lane active")
-	
 	# Hide card system during combat
 	update_card_system_visibility()
 
-	# Start lane combat (this will assign targets and begin attacks)
+	# Enter pre-combat check phase (combat stays PAUSED)
+	enter_pre_combat_check_phase()
+
+func enter_pre_combat_check_phase():
+	"""Enter the pre-combat check phase - review abilities before combat starts"""
+	print("=== ENTERING PRE-COMBAT CHECK PHASE ===")
+
+	# Combat stays PAUSED during this phase
+	var lane = lanes[zoomed_lane_index]
+
+	# Auto-queue abilities for ships with max energy
+	auto_queue_ship_abilities(zoomed_lane_index)
+
+	# Collect all queued abilities from friendly ships
+	var queued_abilities = []
+	for unit in lane["units"]:
+		if unit.get("is_enemy", false):
+			continue  # Skip enemies
+		if unit.has("ability_stack") and unit["ability_stack"].size() > 0:
+			for ability_data in unit["ability_stack"]:
+				# Predict target for this ability
+				var predicted_target = targeting_system.select_target_for_unit(unit, "gamma")
+				var target_name = "No Target"
+				if predicted_target and not predicted_target.is_empty():
+					target_name = predicted_target.get("type", "Unknown")
+
+				queued_abilities.append({
+					"ship": unit,
+					"ability_data": ability_data,
+					"predicted_target": target_name
+				})
+
+	# Display pre-combat check UI
+	show_pre_combat_check_ui(queued_abilities)
+
+	print("Pre-combat check phase ready - ", queued_abilities.size(), " abilities queued")
+
+func auto_queue_ship_abilities(lane_index: int):
+	"""Automatically queue abilities for ships with max energy"""
+	if lane_index < 0 or lane_index >= lanes.size():
+		return
+
+	var lane = lanes[lane_index]
+	var abilities_queued = 0
+	
+	for unit in lane["units"]:
+		# Skip enemies
+		if unit.get("is_enemy", false):
+			continue
+
+		# Check if ship has max energy
+		var current_energy = unit.get("current_energy", 0)
+		var max_energy = unit.get("stats", {}).get("energy", 100)
+
+		if current_energy >= max_energy:
+			# Check if ship has an ability to cast
+			var ship_data = DataManager.get_ship_data(unit.get("type", ""))
+			var ability_function = ship_data.get("ability_function", "")
+			var ability_name = ship_data.get("ability", "")  # CSV column is "ability", not "ability_name"
+
+			if ability_function != "" and ability_name != "":
+				# Ensure ability_stack exists
+				if not unit.has("ability_stack"):
+					unit["ability_stack"] = []
+				
+				# Check if ability is already queued
+				var already_queued = false
+				for queued_ability in unit["ability_stack"]:
+					if queued_ability.get("ability_name") == ability_name:
+						already_queued = true
+						break
+
+				if not already_queued:
+					# Queue the ability
+					var ability_data = {
+						"ability_name": ability_name,
+						"ability_function": ability_function,
+						"source": "ship_energy"
+					}
+					queue_ability_for_ship(unit, ability_data)
+					abilities_queued += 1
+					print("Auto-queued ", ability_name, " for ", unit.get("type", "Unknown"))
+
+	if abilities_queued > 0:
+		print("Auto-queued ", abilities_queued, " ship abilities with max energy")
+
+func show_pre_combat_check_ui(queued_abilities: Array):
+	"""Display the pre-combat check UI with all queued abilities"""
+	# Create main panel
+	pre_combat_check_panel = Panel.new()
+	pre_combat_check_panel.name = "PreCombatCheckPanel"
+
+	var viewport_size = get_viewport_rect().size
+	var panel_width = 500
+	var panel_height = 400
+	pre_combat_check_panel.position = Vector2(viewport_size.x / 2 - panel_width / 2, viewport_size.y / 2 - panel_height / 2)
+	pre_combat_check_panel.custom_minimum_size = Vector2(panel_width, panel_height)
+	pre_combat_check_panel.z_index = 150
+	ui_layer.add_child(pre_combat_check_panel)
+
+	# Create title
+	var title = Label.new()
+	title.text = "PRE-COMBAT CHECK"
+	title.position = Vector2(20, 10)
+	title.add_theme_font_size_override("font_size", 24)
+	title.add_theme_color_override("font_color", Color.YELLOW)
+	pre_combat_check_panel.add_child(title)
+
+	# Create subtitle
+	var subtitle = Label.new()
+	if queued_abilities.is_empty():
+		subtitle.text = "No abilities queued. Ready to begin combat."
+	else:
+		subtitle.text = "The following abilities will execute in order:"
+	subtitle.position = Vector2(20, 45)
+	subtitle.add_theme_font_size_override("font_size", 14)
+	subtitle.add_theme_color_override("font_color", Color.WHITE)
+	pre_combat_check_panel.add_child(subtitle)
+
+	# Create scrollable container for ability list
+	var scroll = ScrollContainer.new()
+	scroll.position = Vector2(20, 75)
+	scroll.custom_minimum_size = Vector2(panel_width - 40, panel_height - 150)
+	pre_combat_check_panel.add_child(scroll)
+
+	# Create ability list container
+	pre_combat_ability_list = VBoxContainer.new()
+	pre_combat_ability_list.custom_minimum_size = Vector2(panel_width - 60, 0)
+	scroll.add_child(pre_combat_ability_list)
+
+	# Add each ability to the list
+	for i in range(queued_abilities.size()):
+		var ability_info = queued_abilities[i]
+		var ship = ability_info["ship"]
+		var ability_data = ability_info["ability_data"]
+		var predicted_target = ability_info["predicted_target"]
+
+		# Create ability entry
+		var entry = HBoxContainer.new()
+		entry.custom_minimum_size = Vector2(panel_width - 60, 40)
+
+		# Queue number
+		var number_label = Label.new()
+		number_label.text = str(i + 1) + "."
+		number_label.custom_minimum_size = Vector2(30, 0)
+		number_label.add_theme_font_size_override("font_size", 16)
+		entry.add_child(number_label)
+
+		# Ship name
+		var ship_label = Label.new()
+		ship_label.text = ship.get("type", "Unknown")
+		ship_label.custom_minimum_size = Vector2(120, 0)
+		ship_label.add_theme_font_size_override("font_size", 14)
+		ship_label.add_theme_color_override("font_color", Color.CYAN)
+		entry.add_child(ship_label)
+
+		# Arrow
+		var arrow_label = Label.new()
+		arrow_label.text = "→"
+		arrow_label.custom_minimum_size = Vector2(20, 0)
+		arrow_label.add_theme_font_size_override("font_size", 16)
+		entry.add_child(arrow_label)
+
+		# Ability name
+		var ability_label = Label.new()
+		ability_label.text = ability_data.get("ability_name", "Unknown")
+		ability_label.custom_minimum_size = Vector2(150, 0)
+		ability_label.add_theme_font_size_override("font_size", 14)
+		ability_label.add_theme_color_override("font_color", Color.ORANGE)
+		entry.add_child(ability_label)
+
+		# Arrow
+		var arrow_label2 = Label.new()
+		arrow_label2.text = "→"
+		arrow_label2.custom_minimum_size = Vector2(20, 0)
+		arrow_label2.add_theme_font_size_override("font_size", 16)
+		entry.add_child(arrow_label2)
+
+		# Target
+		var target_label = Label.new()
+		target_label.text = predicted_target
+		target_label.custom_minimum_size = Vector2(100, 0)
+		target_label.add_theme_font_size_override("font_size", 14)
+		target_label.add_theme_color_override("font_color", Color.RED)
+		entry.add_child(target_label)
+
+		pre_combat_ability_list.add_child(entry)
+
+	# Create confirm button
+	pre_combat_confirm_button = Button.new()
+	pre_combat_confirm_button.text = "Confirm Combat Start"
+	pre_combat_confirm_button.position = Vector2(panel_width / 2 - 100, panel_height - 50)
+	pre_combat_confirm_button.custom_minimum_size = Vector2(200, 40)
+	pre_combat_confirm_button.pressed.connect(confirm_combat_start)
+	pre_combat_check_panel.add_child(pre_combat_confirm_button)
+
+func confirm_combat_start():
+	"""Confirmed - proceed with combat after reviewing abilities"""
+	print("=== CONFIRMING COMBAT START ===")
+
+	# Hide pre-combat check UI
+	if pre_combat_check_panel:
+		pre_combat_check_panel.queue_free()
+		pre_combat_check_panel = null
+
+	# Keep combat PAUSED during ability processing
+	# Process all queued abilities FIRST (before ships start attacking)
+	await process_all_ability_queues_for_lane(zoomed_lane_index)
+
+	# NOW unpause combat and start lane combat
+	combat_paused = false
+	print("Combat UNPAUSED - lane active")
+
+	# Start lane combat (assign targets and begin attacks)
 	start_lane_combat(zoomed_lane_index)
 
 	# Start 5-second timer
@@ -3163,6 +3480,9 @@ func on_combat_phase_complete():
 	# Called when combat timer expires - move to next phase
 	print("Combat phase complete for lane ", zoomed_lane_index)
 
+	# Start post-combat cleanup phase (1 second for projectiles to resolve)
+	await post_combat_cleanup_phase()
+
 	# Determine next action based on current phase
 	if current_turn_phase == "lane_0":
 		# Move to lane 1
@@ -3173,6 +3493,94 @@ func on_combat_phase_complete():
 	elif current_turn_phase == "lane_2":
 		# All lanes complete - return to tactical
 		return_to_tactical_phase()
+
+func post_combat_cleanup_phase():
+	"""1-second cleanup phase to allow projectiles to resolve"""
+	print("=== POST-COMBAT CLEANUP PHASE ===")
+
+	# Set cleanup phase flag to prevent new attacks/abilities
+	in_cleanup_phase = true
+
+	# Clear all temporary card effects from ships in active lane
+	clear_card_effects_for_active_lane()
+
+	# Show cleanup notification
+	show_phase_notification("CLEANUP")
+
+	# Wait 1 second for projectiles to finish
+	await get_tree().create_timer(1.0).timeout
+
+	# Clean up any remaining projectiles
+	cleanup_remaining_projectiles()
+
+	# Clear cleanup phase flag
+	in_cleanup_phase = false
+
+	print("=== CLEANUP PHASE COMPLETE ===")
+
+func show_phase_notification(text: String):
+	"""Show centered notification for phase transitions"""
+	var notification = Label.new()
+	notification.text = text
+	notification.add_theme_font_size_override("font_size", 32)
+	notification.add_theme_color_override("font_color", Color.YELLOW)
+	notification.add_theme_color_override("font_outline_color", Color.BLACK)
+	notification.add_theme_constant_override("outline_size", 4)
+	notification.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	notification.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+
+	# Center on screen
+	var viewport_size = get_viewport_rect().size
+	notification.position = Vector2(viewport_size.x / 2 - 100, viewport_size.y / 2)
+	notification.z_index = 200  # Above everything
+	add_child(notification)
+
+	# Animate: fade in, hold, fade out
+	notification.modulate.a = 0.0
+	var tween = create_tween()
+	tween.tween_property(notification, "modulate:a", 1.0, 0.2)
+	tween.tween_interval(0.6)
+	tween.tween_property(notification, "modulate:a", 0.0, 0.2)
+	tween.tween_callback(notification.queue_free)
+
+func clear_card_effects_for_active_lane():
+	"""Clear temporary card effects from all ships in the active lane"""
+	if not status_effect_manager:
+		return
+
+	# Get all ships in the active lane from lanes array
+	if zoomed_lane_index < 0 or zoomed_lane_index >= lanes.size():
+		return
+
+	var ships = lanes[zoomed_lane_index]["units"]
+
+	# Clear card effects from each ship
+	for ship in ships:
+		if ship.has("card_effects") and ship["card_effects"].size() > 0:
+			print("Combat_2: Clearing ", ship["card_effects"].size(), " card effects from ", ship.get("type", "unknown"))
+
+			# Remove each card effect
+			for effect in ship["card_effects"]:
+				if status_effect_manager.has_method("_remove_card_effect"):
+					status_effect_manager._remove_card_effect(ship, effect)
+
+			# Clear the array
+			ship["card_effects"].clear()
+
+func cleanup_remaining_projectiles():
+	"""Remove any projectiles that haven't resolved after cleanup phase"""
+	var projectiles_cleaned = 0
+
+	# Find all Sprite2D children that are projectiles (have laser textures)
+	for child in get_children():
+		if child is Sprite2D and is_instance_valid(child):
+			# Check if this is a projectile (you can identify by texture path or other means)
+			if child.texture != null:
+				child.queue_free()
+				projectiles_cleaned += 1
+
+	if projectiles_cleaned > 0:
+		print("Cleaned up ", projectiles_cleaned, " unresolved projectiles")
 
 func proceed_to_lane_transition(next_lane_index: int, next_phase: String):
 	# Transition to the next lane
@@ -3429,7 +3837,11 @@ func start_turret_attack_timer(turret: Dictionary):
 	# attack_speed of 1.0 = 1 attack/second = 1.0s per attack
 	# attack_speed of 0.5 = 0.5 attacks/second = 2.0s per attack
 	# attack_speed of 2.0 = 2 attacks/second = 0.5s per attack
-	var attack_interval = 1.0 / turret["stats"]["attack_speed"]
+	var attack_speed = turret["stats"]["attack_speed"]
+	# Apply freeze modifier if active
+	if status_effect_manager:
+		attack_speed *= status_effect_manager.get_freeze_attack_speed_multiplier(turret)
+	var attack_interval = 1.0 / attack_speed
 	attack_timer.wait_time = attack_interval
 	attack_timer.one_shot = false
 	attack_timer.timeout.connect(func(): execute_turret_attack(turret))
@@ -3451,6 +3863,11 @@ func start_turret_attack_timer(turret: Dictionary):
 
 func execute_turret_attack(turret: Dictionary):
 	# Execute a turret attack
+
+	# Don't attack during cleanup phase
+	if in_cleanup_phase:
+		return
+
 	if not turret.has("auto_target") or turret["auto_target"].is_empty():
 		# No target, try to find one
 		var active_lane = turret.get("active_lane", -1)
@@ -3475,6 +3892,10 @@ func stop_turret_combat(turret: Dictionary):
 		return
 
 	var container = turret["container"]
+
+	# Check if container is still valid (not freed)
+	if not is_instance_valid(container):
+		return
 
 	# Stop attack timer
 	var attack_timer = container.get_node_or_null("AttackTimer")
@@ -3562,7 +3983,11 @@ func start_enemy_turret_attack_timer(enemy_turret: Dictionary):
 	# Create attack timer
 	var attack_timer = Timer.new()
 	attack_timer.name = "AttackTimer"
-	var attack_interval = 1.0 / enemy_turret["stats"]["attack_speed"]
+	var attack_speed = enemy_turret["stats"]["attack_speed"]
+	# Apply freeze modifier if active
+	if status_effect_manager:
+		attack_speed *= status_effect_manager.get_freeze_attack_speed_multiplier(enemy_turret)
+	var attack_interval = 1.0 / attack_speed
 	attack_timer.wait_time = attack_interval
 	attack_timer.autostart = true
 	attack_timer.timeout.connect(func():
@@ -3587,6 +4012,10 @@ func start_enemy_turret_attack_timer(enemy_turret: Dictionary):
 func enemy_turret_auto_attack(enemy_turret: Dictionary):
 	# Enemy turret performs an auto-attack on its assigned target
 	if enemy_turret.is_empty():
+		return
+
+	# Don't attack during cleanup phase
+	if in_cleanup_phase:
 		return
 
 	# Check if we have a target
@@ -4070,6 +4499,9 @@ func start_auto_attack(attacker: Dictionary, target: Dictionary):
 
 	# Calculate attack interval: 1 / attack_speed = seconds per attack
 	var attack_speed = attacker["stats"]["attack_speed"]
+	# Apply freeze modifier if active
+	if status_effect_manager:
+		attack_speed *= status_effect_manager.get_freeze_attack_speed_multiplier(attacker)
 	var attack_interval = 1.0 / attack_speed
 
 	# Fire first shot after rotation
@@ -4094,12 +4526,10 @@ func auto_rotate_to_target(attacker: Dictionary, target: Dictionary):
 	var attacker_sprite = attacker["sprite"]
 	var attacker_pos = attacker["container"].position
 	var attacker_size = attacker["size"]
-	var target_pos = target["container"].position
-	var target_size = target["size"]
 
 	# Calculate center positions
 	var attacker_center = attacker_pos + Vector2(attacker_size / 2, attacker_size / 2)
-	var target_center = target_pos + Vector2(target_size / 2, target_size / 2)
+	var target_center = calculate_target_position(attacker, target, attacker_center)
 
 	# Calculate angle to target
 	var direction = target_center - attacker_center
@@ -4116,6 +4546,12 @@ func auto_attack_cycle(attacker: Dictionary, target: Dictionary, attack_interval
 		# Stop if combat is paused
 		if combat_paused:
 			# Wait for combat to unpause
+			await get_tree().create_timer(0.1).timeout
+			continue
+
+		# Stop if in cleanup phase
+		if in_cleanup_phase:
+			# Wait for cleanup to finish
 			await get_tree().create_timer(0.1).timeout
 			continue
 
@@ -4142,25 +4578,34 @@ func auto_attack_cycle(attacker: Dictionary, target: Dictionary, attack_interval
 		await get_tree().create_timer(attack_interval).timeout
 
 func auto_fire_laser(attacker: Dictionary, target: Dictionary):
-	# Fire laser projectiles in auto-combat (all projectiles in one attack)
-	if attacker.is_empty() or target.is_empty():
+	# Fire laser projectiles in auto-combat using consolidated weapon system
+	if weapon_manager and weapon_manager.has_method("fire_weapon_volley"):
+		# Rotate attacker to face target first
+		if attacker.has("sprite") and target.has("sprite"):
+			await rotate_attacker_to_target(attacker, target)
+
+		# Fire all projectiles simultaneously
+		weapon_manager.fire_weapon_volley(attacker, target)
+	else:
+		print("Combat_2: ERROR - weapon_manager not available for auto_fire_laser")
+
+func rotate_attacker_to_target(attacker: Dictionary, target: Dictionary):
+	"""Orient attacker toward target before firing"""
+	if not attacker.has("sprite") or not target.has("sprite"):
 		return
 
-	if not is_instance_valid(attacker.get("container")) or not is_instance_valid(target.get("container")):
-		return
+	var attacker_pos = attacker["sprite"].global_position
+	var target_pos = target["sprite"].global_position
 
-	var num_attacks = attacker["stats"]["num_attacks"]
+	var angle = attacker_pos.angle_to_point(target_pos)
 
-	# Fire multiple projectiles with small delay between them
-	for i in range(num_attacks):
-		if i > 0:
-			await get_tree().create_timer(0.05).timeout
-		auto_fire_single_laser(attacker, target)
-
-	# Gain energy after attack (2-4 random)
-	gain_energy(attacker)
+	# Animate rotation
+	var tween = create_tween()
+	tween.tween_property(attacker["sprite"], "rotation", angle, 0.2)
+	await tween.finished
 
 func auto_fire_single_laser(attacker: Dictionary, target: Dictionary):
+	# DEPRECATED: Use weapon_manager.fire_weapon_volley instead
 	# Fire a single laser in auto-combat
 	if attacker.is_empty() or target.is_empty():
 		return
@@ -4170,12 +4615,10 @@ func auto_fire_single_laser(attacker: Dictionary, target: Dictionary):
 
 	var attacker_pos = attacker["container"].position
 	var attacker_size = attacker["size"]
-	var target_pos = target["container"].position
-	var target_size = target["size"]
 
 	# Calculate center positions
 	var start_pos = attacker_pos + Vector2(attacker_size / 2, attacker_size / 2)
-	var end_pos = target_pos + Vector2(target_size / 2, target_size / 2)
+	var end_pos = calculate_target_position(attacker, target, start_pos)
 
 	# Calculate direction and angle
 	var direction = end_pos - start_pos
@@ -4207,6 +4650,7 @@ func auto_fire_single_laser(attacker: Dictionary, target: Dictionary):
 	tween.tween_callback(auto_on_laser_hit.bind(laser, attacker, target))
 
 func auto_on_laser_hit(laser: Sprite2D, attacker: Dictionary, target: Dictionary):
+	# DEPRECATED: Use weapon_manager.fire_weapon_volley instead
 	# Handle laser reaching target position in auto-combat
 	# If hit: destroy laser and apply damage
 	# If miss: continue traveling until off-screen
@@ -4256,6 +4700,12 @@ func auto_on_laser_hit(laser: Sprite2D, attacker: Dictionary, target: Dictionary
 			var flash_tween = create_tween()
 			flash_tween.tween_property(target_sprite, "modulate", Color(2.0, 2.0, 2.0, 1.0), 0.05)
 			flash_tween.tween_property(target_sprite, "modulate", Color(1.0, 1.0, 1.0, 1.0), 0.1)
+
+		# Check for burn application
+		if status_effect_manager and attacker.get("burn_on_hit_chance", 0.0) > 0:
+			var burn_chance = attacker.get("burn_on_hit_chance", 0.0)
+			if randf() < burn_chance:
+				status_effect_manager.apply_burn(target, 1)
 	else:
 		# No damage (shouldn't happen, but handle gracefully)
 		continue_laser_off_screen(laser)
@@ -4370,11 +4820,7 @@ func queue_ability_for_ship(ship: Dictionary, ability_data: Dictionary):
 		return
 
 	ship["ability_stack"].append(ability_data)
-	print("Queued ability '", ability_data.get("ability_name", "unknown"), "' for ", ship.get("type", "unknown"))
-
-	# Start processing if not already processing
-	if not ship.get("is_processing_abilities", false):
-		process_ability_stack(ship)
+	print("Queued ability '", ability_data.get("ability_name", "unknown"), "' for ", ship.get("type", "unknown"), " - will execute at combat start")
 
 func process_ability_stack(ship: Dictionary):
 	"""Process all abilities in a ship's queue with delays"""
@@ -4384,25 +4830,74 @@ func process_ability_stack(ship: Dictionary):
 	# Mark as processing
 	ship["is_processing_abilities"] = true
 
-	# Process abilities one by one
+	# Pause attack timer during ability execution
+	var attack_timer = null
+	if ship.has("container") and is_instance_valid(ship.get("container")):
+		attack_timer = ship["container"].get_node_or_null("AttackTimer")
+		if attack_timer and attack_timer.is_stopped() == false:
+			attack_timer.paused = true
+
+	# Process abilities one by one with cinematic presentation
 	while ship["ability_stack"].size() > 0:
 		var ability_data = ship["ability_stack"].pop_front()
 
 		print("Processing ability: ", ability_data.get("ability_name", "unknown"))
 
-		# Execute the ability
-		execute_queued_ability(ship, ability_data)
+		# Zoom camera to casting ship
+		await zoom_to_unit(ship, 1.3)
 
-		# Wait 0.5 seconds before next ability
-		await get_tree().create_timer(0.5).timeout
+		# Execute the ability (cinematic mode - 1.5 seconds total)
+		await execute_queued_ability_cinematic(ship, ability_data)
 
 		# Validate ship still exists
 		if not is_instance_valid(ship.get("container")):
 			break
 
+	# Resume attack timer
+	if attack_timer and is_instance_valid(attack_timer) and attack_timer.paused:
+		attack_timer.paused = false
+
+	# Reset energy to 0 after processing abilities (prevents re-queueing next turn)
+	ship["current_energy"] = 0
+	update_energy_bar(ship)
+
 	# Mark as done processing
 	ship["is_processing_abilities"] = false
 	print(ship.get("type", "unknown"), " finished processing ability stack")
+
+func process_all_ability_queues_for_lane(lane_index: int):
+	"""Process ability queues for all ships in a lane at combat start"""
+	if lane_index < 0 or lane_index >= lanes.size():
+		return
+
+	var lane = lanes[lane_index]
+	var ships_with_abilities = []
+
+	# Find all friendly ships with queued abilities
+	for unit in lane["units"]:
+		if unit.get("is_enemy", false):
+			continue  # Skip enemies
+		if unit.has("ability_stack") and unit["ability_stack"].size() > 0:
+			ships_with_abilities.append(unit)
+
+	if ships_with_abilities.is_empty():
+		print("No abilities queued for lane ", lane_index)
+		return
+
+	print("=== PROCESSING ABILITY QUEUES FOR LANE ", lane_index, " ===")
+	print("Ships with abilities: ", ships_with_abilities.size())
+
+	# Process each ship's ability stack
+	for ship in ships_with_abilities:
+		await process_ability_stack(ship)
+
+	# Reset camera to lane view
+	await reset_camera_to_lane_view()
+
+	# Release all stored projectiles at full speed
+	release_stored_projectiles()
+
+	print("=== FINISHED PROCESSING ALL ABILITY QUEUES FOR LANE ", lane_index, " ===")
 
 func execute_queued_ability(ship: Dictionary, ability_data: Dictionary):
 	"""Execute a single queued ability"""
@@ -4414,12 +4909,19 @@ func execute_queued_ability(ship: Dictionary, ability_data: Dictionary):
 	# Show notification
 	show_ability_notification(ship, ability_name)
 
+	# Validate ship still exists
+	if not ship.has("sprite") or not is_instance_valid(ship.get("sprite")):
+		print("Ability fizzled - source ship no longer valid")
+		show_ability_notification(ship, ability_name + " FIZZLED")
+		return
+
 	# Get the target using gamma targeting
 	var target = targeting_system.select_target_for_unit(ship, "gamma")
 
 	if not target or target.is_empty():
 		print("Ability fizzled - no valid target")
-		# Still consume the time (already handled by 0.5s delay)
+		show_ability_notification(ship, ability_name + " FIZZLED")
+		# Still consume the time (already handled by 0.25s delay)
 		return
 
 	# Execute the ability effect
@@ -4427,9 +4929,17 @@ func execute_queued_ability(ship: Dictionary, ability_data: Dictionary):
 		# This is a card effect - use CardEffects
 		var success = await CardEffects.execute_card_effect(ability_function, target, self)
 		if success:
-			# Add to discard if it's a card ability
-			CardHandManager.discard_card(ability_name)
 			print("Ability executed successfully: ", ability_name)
+		else:
+			print("Ability failed to execute: ", ability_name)
+		if success:
+			# Only add to discard if it's from a player card, not from ship energy
+			var source = ability_data.get("source", "")
+			if source != "ship_energy":
+				CardHandManager.discard_card(ability_name)
+				print("Card ability executed and discarded: ", ability_name)
+			else:
+				print("Ship ability executed: ", ability_name)
 		else:
 			print("Ability execution failed: ", ability_name)
 	else:
@@ -4437,26 +4947,79 @@ func execute_queued_ability(ship: Dictionary, ability_data: Dictionary):
 		print("WARNING: Unknown ability type: ", ability_function)
 
 func show_ability_notification(unit: Dictionary, ability_name: String):
-	"""Display floating text notification when ability is cast"""
+	"""Display card popup when ability is cast"""
 	if unit.is_empty() or not unit.has("container"):
 		return
 
 	var container = unit["container"]
-	var unit_size = unit.get("size", 32)
+
+	# Try to get card data for this ability
+	var card_data = DataManager.get_card_data(ability_name)
+
+	if card_data.is_empty():
+		# Fallback to text notification if no card data found
+		show_text_notification(unit, ability_name)
+		return
+
+	# Create a card instance for the popup
+	var card_scene = preload("res://scenes/Card.tscn")
+	var card_popup = card_scene.instantiate()
+
+	# Setup card with data in SHORT display mode
+	card_popup.card_data = card_data.duplicate()
+	card_popup.current_display_mode = 0  # DisplayMode.SHORT
+	card_popup.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	# Scale the card to a reasonable size for popup
+	card_popup.scale = Vector2(0.8, 0.8)
+	card_popup.z_index = 150
+
+	# Position above the ship
+	var card_size = card_popup.custom_minimum_size * card_popup.scale
+	card_popup.position = Vector2(-card_size.x / 2, -60)
+
+	container.add_child(card_popup)
+	card_popup.update_visuals()
+
+	# Animate: float up and fade out
+	var tween = create_tween()
+	tween.set_parallel(true)
+
+	# Float upward
+	tween.tween_property(card_popup, "position:y", card_popup.position.y - 40, 1.2) \
+		.set_trans(Tween.TRANS_SINE) \
+		.set_ease(Tween.EASE_OUT)
+
+	# Fade out after 0.7 seconds
+	tween.tween_property(card_popup, "modulate:a", 0.0, 0.5) \
+		.set_delay(0.7)
+
+	# Destroy after animation
+	tween.finished.connect(func():
+		if is_instance_valid(card_popup):
+			card_popup.queue_free()
+	)
+
+func show_text_notification(unit: Dictionary, ability_name: String):
+	"""Fallback text notification if no card data available"""
+	if unit.is_empty() or not unit.has("container"):
+		return
+
+	var container = unit["container"]
 
 	# Create notification label
 	var notification = Label.new()
 	notification.text = ability_name.to_upper() + "!"
 	notification.add_theme_font_size_override("font_size", 18)
-	notification.add_theme_color_override("font_color", Color(1.0, 0.9, 0.2))  # Gold/yellow
+	notification.add_theme_color_override("font_color", Color(1.0, 0.9, 0.2))
 	notification.add_theme_color_override("font_outline_color", Color(0, 0, 0))
 	notification.add_theme_constant_override("outline_size", 3)
 	notification.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	notification.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 
-	# Position above the ship (above health bars)
-	notification.position = Vector2(-50, -40)  # Centered and above
-	notification.z_index = 150  # Very high, above everything
+	# Position above the ship
+	notification.position = Vector2(-50, -40)
+	notification.z_index = 150
 	container.add_child(notification)
 
 	# Animate: float up and fade out
@@ -4749,3 +5312,162 @@ func display_unit_stats(unit: Dictionary):
 	print("Frequency: ", unit["stats"]["frequency"])
 	print("Health: ", get_unit_health_percent(unit), "%")
 	print("==================")
+
+# ============================================================================
+# CINEMATIC ABILITY EXECUTION
+# ============================================================================
+
+var stored_projectiles: Array = []  # Stores projectiles created during ability queue
+
+func execute_queued_ability_cinematic(ship: Dictionary, ability_data: Dictionary):
+	"""Execute ability with cinematic 1.5 second presentation"""
+	var ability_name = ability_data.get("ability_name", "")
+	var ability_function = ability_data.get("ability_function", "")
+
+	print("Executing CINEMATIC ability: ", ability_name)
+
+	# Show card popup over ship
+	show_ability_notification(ship, ability_name)
+
+	# Validate ship still exists
+	if not ship.has("sprite") or not is_instance_valid(ship.get("sprite")):
+		print("Ability fizzled - source ship no longer valid")
+		await get_tree().create_timer(1.5).timeout
+		return
+
+	# Get the target
+	var target = targeting_system.select_target_for_unit(ship, "gamma")
+
+	if not target or target.is_empty():
+		print("Ability fizzled - no valid target")
+		await get_tree().create_timer(1.5).timeout
+		return
+
+	# Execute the ability effect (this creates projectile in slow-mo)
+	if ability_function.begins_with("execute_"):
+		# Execute with cinematic flag
+		var success = await CardEffects.execute_card_effect_cinematic(ability_function, ship, target, self)
+		if success:
+			print("Cinematic ability executed: ", ability_name)
+		else:
+			print("Cinematic ability failed: ", ability_name)
+
+	# Total time is 1.5 seconds
+	await get_tree().create_timer(1.5).timeout
+
+func zoom_to_unit(unit: Dictionary, zoom_amount: float = 1.3):
+	"""Zoom camera to focus on a specific unit"""
+	if not unit.has("sprite") or not is_instance_valid(unit.get("sprite")):
+		return
+
+	var target_pos = unit["sprite"].global_position
+	var current_pos = camera.global_position
+
+	# Tween camera position and zoom
+	var tween = create_tween()
+	tween.set_parallel(true)
+	tween.set_ease(Tween.EASE_OUT)
+	tween.set_trans(Tween.TRANS_CUBIC)
+
+	tween.tween_property(camera, "global_position", target_pos, 0.3)
+	tween.tween_property(camera, "zoom", Vector2(zoom_amount, zoom_amount), 0.3)
+
+	await tween.finished
+
+func reset_camera_to_lane_view():
+	"""Reset camera back to lane view after abilities"""
+	if not is_zoomed or zoomed_lane_index < 0:
+		return
+
+	var lane = lanes[zoomed_lane_index]
+	var lane_center_y = lane["y_position"]
+
+	# Calculate the center position for the lane
+	var viewport_size = get_viewport_rect().size
+	var target_x = viewport_size.x / 2
+	var target_y = lane_center_y
+	var target_pos = Vector2(target_x, target_y)
+
+	# Tween camera back to lane view
+	var tween = create_tween()
+	tween.set_parallel(true)
+	tween.set_ease(Tween.EASE_IN_OUT)
+	tween.set_trans(Tween.TRANS_CUBIC)
+
+	tween.tween_property(camera, "global_position", target_pos, 0.4)
+	tween.tween_property(camera, "zoom", Vector2(1.0, 1.0), 0.4)
+
+	await tween.finished
+
+	print("Camera reset to lane view")
+
+func release_stored_projectiles():
+	"""Release all stored projectiles at full speed and apply effects"""
+	print("Releasing ", stored_projectiles.size(), " stored projectiles at full speed")
+
+	for projectile_data in stored_projectiles:
+		var sprite = projectile_data.get("sprite")
+		var end_pos = projectile_data.get("end_pos")
+		var target = projectile_data.get("target")
+
+		if not is_instance_valid(sprite):
+			continue
+
+		# Animate to target at full speed (0.3 seconds)
+		var tween = create_tween()
+		tween.tween_property(sprite, "position", end_pos, 0.3)
+
+		# Wait for impact and apply effects
+		tween.finished.connect(_on_stored_projectile_impact.bind(projectile_data))
+
+	# Clear the stored projectiles array
+	stored_projectiles.clear()
+
+func _on_stored_projectile_impact(projectile_data: Dictionary):
+	"""Handle impact of a released projectile"""
+	var sprite = projectile_data.get("sprite")
+	var target = projectile_data.get("target")
+	var damage = projectile_data.get("damage", 0)
+
+	# Remove projectile
+	if is_instance_valid(sprite):
+		sprite.queue_free()
+
+	# Validate target still exists
+	if not target.has("sprite") or not is_instance_valid(target.get("sprite")):
+		print("Target no longer valid for projectile impact")
+		return
+
+	# Apply damage
+	var damage_applied = CardEffects.apply_missile_damage(target, damage)
+
+	# Flash target sprite
+	if target.has("sprite") and is_instance_valid(target.get("sprite")):
+		var target_sprite = target["sprite"]
+		var original_modulate = target_sprite.modulate
+
+		# Check if it's a burn effect (Incinerator Cannon)
+		if projectile_data.has("burn_stacks"):
+			target_sprite.modulate = Color(2, 1, 0.5, 1)  # Orange flash
+		else:
+			target_sprite.modulate = Color(2, 2, 2, 1)  # White flash
+
+		await get_tree().create_timer(0.1).timeout
+		if is_instance_valid(target_sprite):
+			target_sprite.modulate = original_modulate
+
+	# Show damage number
+	CardEffects.show_missile_damage_number(target, damage, damage_applied, self)
+
+	# Apply burn if it's Incinerator Cannon
+	if projectile_data.has("burn_stacks"):
+		var burn_stacks = projectile_data.get("burn_stacks", 0)
+		if status_effect_manager and status_effect_manager.has_method("apply_burn"):
+			status_effect_manager.apply_burn(target, burn_stacks)
+			print("Applied ", burn_stacks, " burn stacks from released projectile")
+
+	# Apply AoE if it's Missile Lock
+	if projectile_data.get("is_missile", false):
+		CardEffects.apply_aoe_effect(target, damage, 1, "enemy", "damage", self)
+
+	print("Projectile impact complete on ", target.get("type", "target"))
