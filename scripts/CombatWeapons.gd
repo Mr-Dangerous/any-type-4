@@ -19,7 +19,89 @@ func set_combat_manager(parent: Node2D):
 # WEAPON FIRING FUNCTIONS (Consolidated manual + auto)
 # ============================================================================
 
+func fire_weapon_volley(attacker: Dictionary, target: Dictionary):
+	"""Fire all projectiles simultaneously from attacker to target"""
+	if attacker.is_empty() or target.is_empty():
+		return
+
+	# Validate instances still exist
+	if not is_instance_valid(attacker.get("container")) or not is_instance_valid(target.get("container")):
+		return
+
+	# Get number of projectiles to fire
+	var num_attacks = attacker["stats"].get("num_attacks", 1)
+
+	# Calculate spawn positions for all projectiles
+	var spawn_offsets = calculate_projectile_spawn_positions(attacker["size"], num_attacks)
+
+	# Get projectile manager
+	if not combat_manager or not "projectile_manager" in combat_manager:
+		print("CombatWeapons: No projectile manager available")
+		return
+
+	var projectile_manager = combat_manager.projectile_manager
+
+	# Fire all projectiles simultaneously (no delays)
+	for i in range(num_attacks):
+		var offset = spawn_offsets[i]
+		projectile_manager.launch_projectile(attacker, target, offset)
+
+	# Gain energy after attack (once for the volley)
+	gain_energy(attacker)
+
+	# Emit signal
+	weapon_fired.emit(attacker, target)
+
+
+func calculate_projectile_spawn_positions(ship_size: int, num_projectiles: int) -> Array[Vector2]:
+	"""Calculate spawn offsets for multiple projectiles distributed across ship"""
+	var offsets: Array[Vector2] = []
+
+	if num_projectiles == 1:
+		# Single projectile - dead center
+		offsets.append(Vector2(0, 0))
+	else:
+		# Multiple projectiles - distribute evenly across ship width
+		var ship_width = ship_size
+		var spacing = ship_width / float(num_projectiles + 1)
+
+		for i in range(num_projectiles):
+			# Horizontal: evenly distributed across ship width
+			# Start at -(ship_width/2) and distribute
+			var x_offset = -(ship_width / 2.0) + spacing * (i + 1)
+
+			# Vertical: slight random spread for visual variety
+			var y_offset = randf_range(-3.0, 3.0)
+
+			offsets.append(Vector2(x_offset, y_offset))
+
+	return offsets
+
+
+# ============================================================================
+
+func calculate_target_position(attacker: Dictionary, target: Dictionary, attacker_center: Vector2) -> Vector2:
+	"""Calculate target position for projectiles.
+	When targeting mothership/boss, fire down the lane (use attacker's Y position).
+	Otherwise, aim at the center of the target."""
+	var target_pos = target["container"].position
+	var target_size = target["size"]
+	var target_type = target.get("object_type", "")
+	
+	# Check if targeting mothership or boss
+	if target_type == "mothership" or target_type == "boss":
+		# Fire down the lane - use attacker's Y position
+		return Vector2(target_pos.x + target_size / 2, attacker_center.y)
+	else:
+		# Normal targeting - aim at center of target
+		return target_pos + Vector2(target_size / 2, target_size / 2)
+
+# ============================================================================
+# DEPRECATED FUNCTIONS (use fire_weapon_volley instead)
+# ============================================================================
+
 func fire_weapon(attacker: Dictionary, target: Dictionary, projectile_delay: float = 0.05):
+	# DEPRECATED: Use fire_weapon_volley instead
 	# Fire weapon projectiles from attacker to target
 	# Works for both manual and auto-combat
 	# projectile_delay: delay between multiple projectiles in one attack
@@ -47,6 +129,7 @@ func fire_weapon(attacker: Dictionary, target: Dictionary, projectile_delay: flo
 	weapon_fired.emit(attacker, target)
 
 func fire_projectile(attacker: Dictionary, target: Dictionary):
+	# DEPRECATED: Use fire_weapon_volley instead
 	# Fire a single projectile from attacker to target
 	# Consolidated version of fire_single_laser() and auto_fire_single_laser()
 
@@ -59,12 +142,10 @@ func fire_projectile(attacker: Dictionary, target: Dictionary):
 
 	var attacker_pos = attacker["container"].position
 	var attacker_size = attacker["size"]
-	var target_pos = target["container"].position
-	var target_size = target["size"]
 
 	# Calculate center positions
 	var start_pos = attacker_pos + Vector2(attacker_size / 2, attacker_size / 2)
-	var end_pos = target_pos + Vector2(target_size / 2, target_size / 2)
+	var end_pos = calculate_target_position(attacker, target, start_pos)
 
 	# Calculate direction and angle
 	var direction = end_pos - start_pos
@@ -100,6 +181,7 @@ func fire_projectile(attacker: Dictionary, target: Dictionary):
 	)
 
 func on_projectile_hit(projectile: Sprite2D, attacker: Dictionary, target: Dictionary):
+	# DEPRECATED: Use fire_weapon_volley instead
 	# Handle projectile hitting the target
 	# Consolidated version of on_laser_hit() and auto_on_laser_hit()
 
@@ -116,6 +198,9 @@ func on_projectile_hit(projectile: Sprite2D, attacker: Dictionary, target: Dicti
 	var damage_dealt = calculate_damage(attacker, target)
 	if damage_dealt > 0:
 		apply_damage(target, damage_dealt)
+
+		# Apply burn status effect if attacker has fire damage
+		apply_burn_on_hit(attacker, target, damage_dealt)
 
 	# Flash the target
 	if target.has("sprite"):
@@ -143,12 +228,10 @@ func rotate_to_target(attacker: Dictionary, target: Dictionary):
 	var attacker_sprite = attacker["sprite"]
 	var attacker_pos = attacker["container"].position
 	var attacker_size = attacker["size"]
-	var target_pos = target["container"].position
-	var target_size = target["size"]
 
 	# Calculate center positions
 	var attacker_center = attacker_pos + Vector2(attacker_size / 2, attacker_size / 2)
-	var target_center = target_pos + Vector2(target_size / 2, target_size / 2)
+	var target_center = calculate_target_position(attacker, target, attacker_center)
 
 	# Calculate angle to target
 	var direction = target_center - attacker_center
@@ -292,6 +375,11 @@ func cast_ability(unit: Dictionary):
 	if unit.is_empty():
 		return
 
+	# Don't cast abilities during cleanup phase
+	if combat_manager and combat_manager.get("in_cleanup_phase"):
+		print("CombatWeapons: Ability casting blocked during cleanup phase")
+		return
+
 	var ability_name = unit.get("ability_name", "")
 	var ability_function = unit.get("ability_function", "")
 
@@ -350,3 +438,42 @@ func normalize_card_function_name(function_name: String) -> String:
 			result += "_" + word.capitalize()
 
 	return result
+
+# ============================================================================
+# STATUS EFFECT APPLICATION
+# ============================================================================
+
+func apply_burn_on_hit(attacker: Dictionary, target: Dictionary, damage_dealt: int):
+	"""Apply burn status effect if attacker has fire damage and burn chance"""
+	print("CombatWeapons: apply_burn_on_hit called - damage:", damage_dealt)
+
+	# Check if damage was actually dealt (not a miss)
+	if damage_dealt <= 0:
+		print("CombatWeapons: No damage dealt, skipping burn")
+		return
+
+	# Check if attacker has burn chance
+	var burn_chance = attacker.get("burn_on_hit_chance", 0.0)
+	print("CombatWeapons: Attacker burn chance:", burn_chance, " | Attacker type:", attacker.get("type", "unknown"))
+	if burn_chance <= 0:
+		print("CombatWeapons: No burn chance, skipping")
+		return
+
+	# Roll for burn application
+	var roll = randf()
+	if roll >= burn_chance:
+		return
+
+	# Get status effect manager from combat manager
+	if not combat_manager or not "status_effect_manager" in combat_manager:
+		print("CombatWeapons: No status effect manager available")
+		return
+
+	var status_manager = combat_manager.status_effect_manager
+	if not status_manager or not status_manager.has_method("apply_burn"):
+		print("CombatWeapons: Status manager doesn't have apply_burn method")
+		return
+
+	# Apply 1 stack of burn
+	status_manager.apply_burn(target, 1)
+	print("CombatWeapons: Applied 1 burn stack to ", target.get("type", "target"))

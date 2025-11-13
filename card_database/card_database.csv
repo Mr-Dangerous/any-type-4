@@ -1,6 +1,28 @@
-card_name,card_type,card_description,card_function,rarity,sprite_path,target_type,projectile_sprite_path,projectile size
-Strike,Tactical Command,Target ship gains +50% attack speed,execute_Strike,Common,res://assets/Icons/Strike_card_icon.png,friendly_ship,,
-Shield,Tactical Command,Target ship gains 30 shields,execute_Shield,Common,res://assets/Icons/Shield_card_icon.png,friendly_ship,,
-Energy Alpha,Power Plant,Target ship gains 100 energy,execute_Energy_Alpha,Common,res://assets/Icons/Energy_Alpha_card_icon.png,friendly_ship,,
-Turret Blast,Turret,Activate a turret ability.,execute_Turret_Blast,Common,res://assets/Icons/Turret_Blast_card_icon.png,friendly_turret,,
-Missile Lock,Ship Ability,Launch a missile that deals 50 explosive damage.,execute_Missile_Lock,Common,res://assets/Effects/s_fxProjectile_2_drone/s_fxProjectile_2_drone.png,friendly_ship,res://assets/Effects/s_fxProjectile_2_drone/s_fxProjectile_2_drone.png,70
+card_name,Cycle,implemented,Author,card_type,card_rules_description,card_short_description,card_function,rarity,sprite_path,target_type,projectile_sprite_path,projectile size,ability_queue
+Strike,Basic,TRUE,Me,Tactical Command,Target ship gains +50% attack speed for the turn,Increase attack speed,execute_Strike,Common,res://assets/Icons/Strike_card_icon.png,friendly_ship,,,FALSE
+Shield,Basic,TRUE,Me,Tactical Command,Target ship gains 30 shields,Grant 30 shields,execute_Shield,Common,res://assets/Icons/Shield_card_icon.png,friendly_ship,,,FALSE
+Energy Alpha,Energy,TRUE,Me,Power Plant,Target ship gains 100 energy,Restore 100 energy,execute_Energy_Alpha,Common,res://assets/Icons/Energy_Alpha_card_icon.png,friendly_ship,,,FALSE
+Turret Blast,Basic,FALSE,Me,Turret,Activate a turret ability.,Activate turret ability,execute_Turret_Blast,Common,res://assets/Icons/Turret_Blast_card_icon.png,friendly_turret,,,FALSE
+Missile Lock,Basic,TRUE,Me,Ship Ability,Launch a missile that deals 50 explosive damage. AoE(1),Deal 50 explosive damage. AoE(1),execute_Missile_Lock,Common,res://assets/Icons/Missile_Lock_card_icon.png,friendly_ship,res://assets/Effects/s_fxProjectile_2_drone/s_fxProjectile_2_drone.png,70,TRUE
+Energy Beta,Energy,TRUE,Me,Power Plant,Target ship gains 75 energy. AoE(1),Restore 75 energy (AoE 1),execute_Energy_Beta,Uncommon,res://assets/Icons/place_boi.png,friendly_ship,,,FALSE
+Incendiary Rounds,Elemental Ammo,TRUE,Me,Tactical Command,Target ship attacks are fire damage and have a 25% chance to apply 1 burn on hit.,Convert attacks to fire damage,execute_Incendiary_Rounds,Uncommon,res://assets/Icons/incendiary_rounds.png,friendly_ship,,,FALSE
+Cryo Rounds,Elemental Ammo,TRUE,Me,Tactical Command,Target ship attacks are ice damage and have a 25% chance to apply 1 freeze on hit.,Convert attacks to ice damage,execute_Cryo_Rounds,Uncommon,res://assets/Icons/place_boi.png,friendly_ship,,,FALSE
+Acid Rounds,Elemental Ammo,,Me,Tactical Command,Target ship attacks are acid damage and have a 25% chance to apply 1 acid on hit.,Convert attacks to acid damage,,Rare,res://assets/Icons/place_boi.png,friendly_ship,,,FALSE
+Gravity Rounds,Elemental Ammo,,Me,Tactical Command,Target ship attacks are gravity damage and have a 25% chance to apply 1 gravity on hit.,Convert attacks to gravity damage,,Epic,res://assets/Icons/place_boi.png,friendly_ship,,,FALSE
+Explosive Rounds,Elemental Ammo,,Me,Tactical Command,Target ship attacks are explosive damage and have a 25% chance to explode (AoE 1) on hit.,Convert attacks to explosive damage,,Uncommon,res://assets/Icons/place_boi.png,friendly_ship,,,FALSE
+Static Rounds,Elemental Ammo,,Me,Tactical Command,Target ship attacks are lightning damage and have a 25% chance to apply 1 static on hit.,Convert attacks to lightning damage,,Rare,res://assets/Icons/place_boi.png,friendly_ship,,,FALSE
+Energy Gamma,Energy,,Me,Power Plant,Target Ship gains 50 energy. Area of effect (2),Restore 50 energy (AoE 2),,Rare,res://assets/Icons/place_boi.png,friendly_ship,,,FALSE
+Incinerator Cannon,Upgrade,TRUE,Me,Upgrade,Launch a firebeam that deals 20 fire damage and applies 3 stacks of burn.,Deal 20 fire damage + burn,execute_Incinerator_Cannon,Rare,res://assets/Icons/incinerator_cannon.png,friendly_ship,res://assets/Effects/laser_huge/s_laser_huge_04.png,30,TRUE
+Steam Explosion,Elemental Combo,,Me,Elemental Combo,"30 fire damage, applies blind for 2 seconds. AoE(1).",,,,res://assets/Icons/place_boi.png,,,,FALSE
+Thermal Runaway,Elemental Combo,,Me,Elemental Combo,"30 fire damage, applies Malfunction for 2 seconds. AoE (1)",,,,res://assets/Icons/place_boi.png,,,,FALSE
+Exothermic Surge,Elemental Combo,,Me,Elemental Combo,"10 acid damage, convert acid to burn. AoE(1)",,,,res://assets/Icons/place_boi.png,,,,FALSE
+Fiery Implosion,Elemental Combo,,Me,Elemental Combo,20 Fire damage per gravity Stack. AoE(1),,,,res://assets/Icons/place_boi.png,,,,FALSE
+Thermal Shock,Elemental Combo,,Me,,,,,,res://assets/Icons/place_boi.png,,,,FALSE
+Cyro-Lightning Bomb,Elemental Combo,,Me,,10 Lightning damage. double effectiveness of freeze. does not remove freeze stacks. AoE(1),,,,res://assets/Icons/place_boi.png,,,,FALSE
+Crystallization,Elemental Combo,,Me,,,,,,res://assets/Icons/place_boi.png,,,,FALSE
+Subzero Impulse,Elemental Combo,,Me,,,,,,res://assets/Icons/place_boi.png,,,,FALSE
+Fiery Lightning,Elemental Combo,,Me,,10 Acid Damage per existing acid stack. Does not remove Acid stacks. AoE(1),,,,res://assets/Icons/place_boi.png,,,,FALSE
+Catalyze,Elemental Combo,,Me,,,,,,res://assets/Icons/place_boi.png,,,,FALSE
+Double Blasters,Powerup,,Me,Powerup,This ship gains doubled projectiles (number of attacks) for 5 seconds.,,,,res://assets/Icons/place_boi.png,,,,FALSE
+Shrapnel Blast,Elemental Combo,,Me,Elemental Combo,20 fire damage per stack of burn.  AoE(1),,execute_Shrapnel_Blast,,res://assets/Effects/s_fxProjectile_2_drone/s_fxProjectile_2_drone.png,,,90,FALSE
+Alpha Strike,Ship Ability,,Me,Ship Ability,This ship gains +50% attack speed,Increase attack speed,execute_Alpha_Strike,Common,res://assets/Icons/Alpha_Strike_card_icon.png,,,,TRUE

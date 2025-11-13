@@ -24,7 +24,7 @@ func initialize_seed(seed_value: int) -> void:
 ## Generate and set a new random seed
 func generate_new_seed() -> int:
 	# Use system time to generate a unique seed
-	current_seed = 42112#Time.get_ticks_msec()
+	current_seed = Time.get_ticks_msec() #42112
 	rng.seed = current_seed
 	return current_seed
 

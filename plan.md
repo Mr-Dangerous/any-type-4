@@ -248,9 +248,6 @@ TODO: The  UI has two additionlal resources, needs a proper window, and also nee
   - Small delay between multiple projectiles (0.05s)
   - Laser sprites scale to 6px height
   - Flight duration: 0.2s
-- [x] Attack rotation
-  - Attackers smoothly rotate to face target (0.3s)
-  - Rotation calculated from center-to-center positions
 - [x] Continuous attack system
   - Attack timer created on first shot
   - Fires repeatedly based on attack_speed stat
@@ -433,6 +430,12 @@ TODO: The  UI has two additionlal resources, needs a proper window, and also nee
   - attack_speed now consistent across all unit types
   - attack_speed = 1.0 → 1 attack/second
   - attack_speed = 0.5 → 0.5 attacks/second (2s interval)
+- [x] Consolidated projectile system (CombatProjectileManager.gd)
+  - Separate projectile manager for cleaner code organization
+  - launch_projectile() for simultaneous non-blocking projectile firing
+  - Projectiles 30% slower (0.26s flight time instead of 0.2s)
+  - Post-combat cleanup phase (1 second for projectiles to resolve)
+  - No new projectiles/abilities during cleanup phase
 
 ### 2.18 Grid-Based Movement System ✓ COMPLETED
 - [x] Grid cell system
@@ -451,10 +454,10 @@ TODO: The  UI has two additionlal resources, needs a proper window, and also nee
 
 ### 2.19 Turret System ✓ COMPLETED
 - [x] Turret placement and configuration
-  - 5 turrets total (2 primary, 3 secondary)
+  - 15 turrets total
   - Positioned at mothership + offsets
   - Each turret targets specific lanes
-  - 100px turret size, health bars above
+  - 40px turret size, health bars above
 - [x] Turret combat
   - Auto-targeting enemies in target lanes
   - Attack timers based on turret attack_speed
@@ -466,11 +469,12 @@ TODO: The  UI has two additionlal resources, needs a proper window, and also nee
   - Only attack enemies in active lane
   - Return to multi-lane targeting after combat
 
-### 2.20 Card System ⚠️ PARTIALLY IMPLEMENTED
+### 2.20 Card System ✓ CORE COMPLETE, EXPANDING
 - [x] Card database and data loading
-  - card_database.csv with 4 cards (Strike, Shield, Energy Alpha, Turret Blast)
+  - card_database.csv with 10+ cards (Strike, Shield, Energy Alpha, Energy Beta, Turret Blast, Missile Lock, Incendiary Rounds, Cryo Rounds, **Incinerator Cannon**)
   - starting_deck.csv with starting deck composition
   - DataManager loads card data on startup
+  - ability_queue column determines if card queues or executes immediately
 - [x] Card visual system
   - Card.tscn with NinePatchRect frame
   - Card artwork from sprite_path in CSV
@@ -493,28 +497,116 @@ TODO: The  UI has two additionlal resources, needs a proper window, and also nee
   - Target validation before card play
 - [x] Card effects implementation
   - CardEffects.gd with static effect functions
-  - Strike: +50% attack speed to target ship
-  - Shield: +30 shields to target ship
+  - Strike: +50% attack speed for one turn
+  - Shield: +30 shields to target ship (overshield at 1/3 rate)
   - Energy Alpha: +100 energy to target ship
+  - Energy Beta: +75 energy to target ship, AoE(1) with 50% falloff
   - Turret Blast: Activate turret ability
+  - Missile Lock: 50 explosive damage (AoE 1), queued ability
+  - **Incinerator Cannon**: 20 fire damage + 3 burn stacks, queued ability
+  - Incendiary Rounds: Convert attacks to fire damage, 25% burn chance
+  - Cryo Rounds: Convert attacks to ice damage, 25% freeze chance (lasts until lane cleanup)
   - Visual effect notifications (floating text)
+- [x] **Ability Queue System** ✓ NEW
+  - ability_queue CSV column marks cards for queuing vs instant execution
+  - Ships have ability_stack arrays for storing queued abilities
+  - Abilities queue during precombat phase (when cards are played)
+  - All queued abilities execute at combat start in sequence
+  - 0.25 second delay between ability executions
+  - Attack timers paused during ability execution phase
+  - Fizzle handling for invalid targets
+- [x] **Cinematic Ability System** ✓ NEW
+  - Camera zooms to casting ship (1.3x zoom, 0.3s transition)
+  - Card popup displayed above ship during cast
+  - Projectiles spawn in slow-motion (move 10% distance over 1.2s)
+  - Total 1.5 seconds per ability with cinematic presentation
+  - Camera resets to lane view after all abilities (0.4s transition)
+  - ALL stored projectiles release at full speed simultaneously
+  - Projectiles fly to targets at normal speed (0.3s)
+  - Full damage/effect application on impact
+  - [!] BUG: Ships not in queue auto-fire during ability cast phase (TODO: fix tomorrow)
 - [x] Card system integration with combat
   - Cards visible in both precombat and combat phases
   - Draw cards anytime during lane view
   - Cards only playable during precombat phase
   - Cards removed from hand after successful play
   - Cards persist across lanes
+- [x] Temporary card effects
+  - Card effects persist for entire lane combat
+  - Cleared automatically during post-combat cleanup phase
+  - Visual notification when effects expire
 - [x] Ability casting on energy max
   - Ships cast abilities when energy reaches max
   - Ability casting blocked during combat_paused
   - Energy Alpha can trigger instant ability cast in combat
-- [ ] KNOWN ISSUES:
-  - Cards cannot be interacted with in second lane (targeting/dragging broken)
-  - Need more card types and effects
+- [ ] TODO:
+  - Fix: Ships auto-firing during ability cast phase (should wait)
+  - Need more card types and effects (Acid Rounds, Gravity Rounds, etc.)
   - No card cost system yet
   - No deck building between battles
+  - Elemental combo cards not yet implemented
 
-### 2.21 NOT YET IMPLEMENTED
+### 2.21 Status Effect System ✓ COMPLETED
+- [x] Status effect manager (CombatStatusEffectManager.gd)
+  - Centralized status effect processing
+  - Lane-aware effect timing (only active during lane combat)
+  - Support for DOT effects (burn) and stat modifiers (freeze)
+  - Visual indicators above ships (icons with stack counts)
+- [x] Burn status effect
+  - 5 damage per tick per stack
+  - 1-second tick interval
+  - 10-second total duration
+  - Damage numbers show fire icon
+  - Applies to shields first, then armor
+- [x] Freeze status effect
+  - 25% attack speed reduction per stack (multiplicative: 0.75^stacks)
+  - 25% evasion reduction per stack (multiplicative: 0.75^stacks)
+  - 2-second duration per stack
+  - Each stack tracked individually with separate timer
+  - Stacks expire one at a time
+  - Visual indicator shows total stack count (❄️)
+- [x] Status effect application
+  - Incendiary Rounds: 25% chance to apply 1 burn stack on hit
+  - Cryo Rounds: 25% chance to apply 1 freeze stack on hit
+  - Status effects check in projectile hit handlers
+  - Only apply on successful hits (not on miss)
+- [x] Status effect visuals
+  - HBoxContainer above health bars
+  - Fire icon (🔥) for burn with stack count
+  - Ice icon (❄️) for freeze with stack count
+  - Color-coded text (orange for burn, cyan for freeze)
+  - Floating damage numbers for burn ticks
+- [x] Status effect integration
+  - Freeze modifiers applied to attack speed calculations (4 locations)
+  - Freeze modifiers applied to evasion in hit chance calculation
+  - Burn damage ticks during active lane combat
+  - Effects update in real-time during combat
+
+### 2.22 Ship Inspector Tooltip ✓ COMPLETED
+- [x] Hover tooltip system
+  - Mouse enter/exit detection on ship containers
+  - Tooltip follows mouse position (offset to avoid cursor)
+  - Smooth pop-in animation (scale + fade)
+  - Auto-hides when mouse leaves ship
+- [x] Ship stats display
+  - Ship name/type at top
+  - Current/max values for shield, armor, energy
+  - Overshield display (+value)
+  - Combat stats: damage, attack speed, num attacks, accuracy, evasion, reinforced armor
+- [x] Temporary stat display
+  - RichTextLabel with BBCode support
+  - Base stats in white
+  - Modified stats in red (when reduced)
+  - Format: "Attack Speed: 2.0 (1.5)" where 1.5 is red
+  - Format: "Evasion: 20% (15%)" where 15% is red
+  - Shows freeze stack effects in real-time
+- [x] Tooltip positioning
+  - Initially appears at mouse + offset
+  - Clamped to screen bounds
+  - Repositions to avoid going off-screen
+  - Consistent size (200px width, auto height)
+
+### 2.23 NOT YET IMPLEMENTED
 The following systems from the original plan are not yet implemented:
 
 - [ ] Enemy wave system and AI movement
@@ -756,79 +848,83 @@ StarMap → ...
 23. **Attack Speed Fix** - Corrected turret attack timing to match ship formula
 24. **Grid-Based Movement** - Drag-and-drop ship repositioning with valid move detection
 25. **Turret System** - 5 turrets with lane-specific targeting and combat integration
-26. **Card System (Partial)** - Hand UI, draw mechanics, drag-and-drop targeting, card effects (Strike, Shield, Energy Alpha, Turret Blast)
+26. **Card System (Core Complete)** - Hand UI, draw mechanics, drag-and-drop targeting, 10+ card effects including elemental ammo types
 27. **Seed Manager System** - Deterministic RNG for starmap, deck shuffling, and progression (combat RNG remains non-deterministic)
+28. **Status Effect System** - Burn (DOT) and Freeze (stat modifier) effects with individual stack tracking
+29. **Ship Inspector Tooltip** - Hover tooltips showing stats with real-time temporary stat modifiers in color
+30. **Ability Queue System** - Cards can queue abilities on ships that execute at combat start with proper sequencing
+31. **Cinematic Ability System** - Camera zoom, slow-motion projectiles, card popups, and full-speed release after queue
+32. **Incinerator Cannon Card** - Implemented fire beam projectile with 20 damage + 3 burn stacks
 
-### Immediate Next Steps - ABILITY SYSTEM
-The combat mechanics are solid. Next focus is implementing ship abilities:
+### Immediate Next Steps - PILOT SYSTEM
+The combat mechanics and card system are solid. Next focus is implementing the pilot system:
 
-**Priority 1: Ability Implementation Framework**
-1. **Ability Execution System**
-   - Execute ability functions dynamically from ship data
-   - Pass unit and target context to ability functions
-   - Handle ability cooldowns and energy costs
-   - Visual feedback for ability activation
+**Priority 1: Pilot Data & Management**
+1. **Pilot CSV Database**
+   - pilot_database.csv with pilot stats and traits
+   - Columns: pilot_id, display_name, portrait_path, class/specialty
+   - Base stats: accuracy_bonus, evasion_bonus, attack_speed_bonus
+   - Traits: special abilities or passive bonuses
+   - Experience/level progression (optional for MVP)
 
-2. **Core Ability Functions**
-   - Implement placeholder abilities for testing
-   - Alpha Strike (Interceptor): Double attack speed for 5s
-   - Missile Lock (Fighter): 20 explosion damage to target
-   - Shield Battery (Frigate): Restore 40% shields to lane
-   - Acid Splash (Elite): 10 acid damage + corrosion stack
-   - Lightning Cannon (Turret): Strip shields from all in lane
-   - Torpedo Launch (Corvette): 50 damage (100 vs reinforced armor)
+2. **Pilot Roster System**
+   - PilotManager singleton for pilot tracking
+   - Available pilots pool
+   - Assigned pilots (linked to ships)
+   - Injured/unavailable pilots
+   - Pilot hiring/recruitment mechanics
 
-3. **Ability UI**
-   - Ability ready indicators on ships
-   - Visual effects for ability activation
-   - Energy bar improvements for readability
+3. **Pilot-Ship Assignment**
+   - UI for assigning pilots to ships
+   - Visual indicator showing assigned pilot (portrait/icon)
+   - Stat bonuses applied when pilot assigned
+   - Unassign/reassign mechanics
+   - Ship performance without pilot (baseline stats)
 
-4. **Ability Testing**
-   - Test each ability function
-   - Balance energy costs and effects
-   - Verify ability interactions with combat
+**Priority 2: Pilot Integration with Combat**
+1. **Stat Bonuses**
+   - Apply pilot accuracy bonus to ship accuracy
+   - Apply pilot evasion bonus to ship evasion
+   - Apply pilot attack speed bonus to ship attack speed
+   - Display modified stats in ship inspector tooltip
 
-**After Abilities - CARD MECHANICS**
-Once abilities work, implement the card system:
+2. **Pilot Traits/Abilities**
+   - Passive traits (e.g., +10% shield regeneration)
+   - Active abilities (cooldown-based)
+   - Trait effects trigger during combat
+   - Visual feedback for trait activation
 
-1. **Card Hand UI**
-   - Display player hand at bottom of screen (UI layer)
-   - 5-card hand with card preview on hover
-   - Card art, name, cost, description display
-   - Draw pile and discard pile counters
+3. **Pilot Experience & Injury**
+   - Pilots gain XP from combat participation
+   - Ships destroyed = pilot injured (unavailable for X turns)
+   - Pilot level-up system (optional for MVP)
+   - Medical bay/recovery mechanics
 
-2. **Card Play Mechanics**
-   - Drag cards to lanes or click to select
-   - Resource cost validation before play
-   - Card effects trigger on play
-   - Discard card after use
-   - End turn button to advance
+**Priority 3: Pilot UI**
+1. **Pilot Selection Interface**
+   - Pilot roster panel (in hangar or pre-combat)
+   - Pilot portraits and stat displays
+   - Assignment drag-and-drop or click-to-assign
+   - Current assignments visible
 
-3. **Card Effects System**
-   - Deploy ship cards (spawn ships in lanes)
-   - Instant effect cards (damage, healing, buffs)
-   - Persistent effect cards (upgrades, abilities)
-   - Target selection for targeted cards
+2. **Combat Pilot Display**
+   - Small pilot portrait on ship containers
+   - Tooltip shows pilot name and bonuses
+   - Pilot status indicators (healthy/injured)
 
-4. **Card Draw & Turn System**
-   - Draw 5 cards at start of turn
-   - Shuffle discard into draw when empty
-   - Starting deck loaded from CSV
-   - Turn counter and phase tracking
-
-5. **Integration with Combat**
-   - Cards deploy ships instead of direct deployment buttons
-   - Resource costs deducted from GameData
-   - Card effects interact with ships in lanes
-   - Combat rewards give new cards
+3. **Pilot Management Screen**
+   - Full roster view with filtering
+   - Pilot details and history
+   - Recruitment/dismissal options
+   - Medical bay status
 
 ### Medium-Term Goals
-1. Pilot system (assignment, traits, injury)
-2. Turret system
-3. Ability system (energy generation, auto-cast)
-4. Enemy waves and previews
-5. Expand starmap with node types
-6. Convert DeckBuilder to Hangar
+1. **Pilot System** (next priority) - Assignment, traits, injury, XP
+2. **Enemy Waves** - Spawn timing, wave composition, preview system
+3. **Victory/Defeat Conditions** - Combat end triggers, rewards screen
+4. **Expand Starmap** - Node types (combat/event/shop/rest/boss), path validation
+5. **Convert DeckBuilder to Hangar** - Fleet management, pilot roster, upgrades panel
+6. **More Card Types** - Complete elemental ammo set, combo cards, ship deployment cards
 
 ### Long-Term Goals
 1. Complete card set

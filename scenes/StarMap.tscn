@@ -1,6 +1,6 @@
 [gd_scene load_steps=2 format=3 uid="uid://starmap123"]
 
-[ext_resource type="Script" path="res://scripts/StarMap.gd" id="1_starmap"]
+[ext_resource type="Script" uid="uid://dyrs4osf7xcbp" path="res://scripts/StarMap.gd" id="1_starmap"]
 
 [node name="StarMap" type="Node2D"]
 script = ExtResource("1_starmap")
@@ -14,8 +14,8 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-color = Color(0.02, 0.02, 0.08, 1)
 mouse_filter = 2
+color = Color(0.02, 0.02, 0.08, 1)
 
 [node name="StarContainer" type="Node2D" parent="."]
 
@@ -24,7 +24,6 @@ mouse_filter = 2
 [node name="IconLayer" type="Node2D" parent="."]
 
 [node name="Camera2D" type="Camera2D" parent="."]
-enabled = true
 
 [node name="UI" type="CanvasLayer" parent="."]
 
@@ -44,6 +43,7 @@ offset_right = 1152.0
 offset_bottom = 648.0
 
 [node name="RefreshButton" type="Button" parent="UI/DebugControls"]
+layout_mode = 0
 offset_left = 340.0
 offset_top = 580.0
 offset_right = 500.0
@@ -52,12 +52,293 @@ theme_override_font_sizes/font_size = 16
 text = "Refresh Starmap"
 
 [node name="ParallelPathButton" type="Button" parent="UI/DebugControls"]
+layout_mode = 0
 offset_left = 520.0
 offset_top = 580.0
 offset_right = 720.0
 offset_bottom = 620.0
 theme_override_font_sizes/font_size = 16
 text = "Prevent Parallel: OFF"
+
+[node name="ColumnsLabel" type="Label" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 20.0
+offset_right = 180.0
+offset_bottom = 50.0
+theme_override_colors/font_color = Color(0.8, 0.9, 1, 1)
+theme_override_font_sizes/font_size = 16
+text = "Columns: 8"
+
+[node name="ColumnsDecreaseBtn" type="Button" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 55.0
+offset_right = 60.0
+offset_bottom = 85.0
+theme_override_font_sizes/font_size = 18
+text = "-"
+
+[node name="ColumnsIncreaseBtn" type="Button" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 70.0
+offset_top = 55.0
+offset_right = 110.0
+offset_bottom = 85.0
+theme_override_font_sizes/font_size = 18
+text = "+"
+
+[node name="MinRowsLabel" type="Label" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 100.0
+offset_right = 180.0
+offset_bottom = 130.0
+theme_override_colors/font_color = Color(0.8, 0.9, 1, 1)
+theme_override_font_sizes/font_size = 16
+text = "Min Rows: 3"
+
+[node name="MinRowsDecreaseBtn" type="Button" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 135.0
+offset_right = 60.0
+offset_bottom = 165.0
+theme_override_font_sizes/font_size = 18
+text = "-"
+
+[node name="MinRowsIncreaseBtn" type="Button" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 70.0
+offset_top = 135.0
+offset_right = 110.0
+offset_bottom = 165.0
+theme_override_font_sizes/font_size = 18
+text = "+"
+
+[node name="MaxRowsLabel" type="Label" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 180.0
+offset_right = 180.0
+offset_bottom = 210.0
+theme_override_colors/font_color = Color(0.8, 0.9, 1, 1)
+theme_override_font_sizes/font_size = 16
+text = "Max Rows: 5"
+
+[node name="MaxRowsDecreaseBtn" type="Button" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 215.0
+offset_right = 60.0
+offset_bottom = 245.0
+theme_override_font_sizes/font_size = 18
+text = "-"
+
+[node name="MaxRowsIncreaseBtn" type="Button" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 70.0
+offset_top = 215.0
+offset_right = 110.0
+offset_bottom = 245.0
+theme_override_font_sizes/font_size = 18
+text = "+"
+
+[node name="MinDistLabel" type="Label" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 260.0
+offset_right = 180.0
+offset_bottom = 290.0
+theme_override_colors/font_color = Color(0.8, 0.9, 1, 1)
+theme_override_font_sizes/font_size = 16
+text = "Min Dist: 100"
+
+[node name="MinDistDecreaseBtn" type="Button" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 295.0
+offset_right = 60.0
+offset_bottom = 325.0
+theme_override_font_sizes/font_size = 18
+text = "-"
+
+[node name="MinDistIncreaseBtn" type="Button" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 70.0
+offset_top = 295.0
+offset_right = 110.0
+offset_bottom = 325.0
+theme_override_font_sizes/font_size = 18
+text = "+"
+
+[node name="MaxDistLabel" type="Label" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 340.0
+offset_right = 180.0
+offset_bottom = 370.0
+theme_override_colors/font_color = Color(0.8, 0.9, 1, 1)
+theme_override_font_sizes/font_size = 16
+text = "Max Dist: 500"
+
+[node name="MaxDistDecreaseBtn" type="Button" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 375.0
+offset_right = 60.0
+offset_bottom = 405.0
+theme_override_font_sizes/font_size = 18
+text = "-"
+
+[node name="MaxDistIncreaseBtn" type="Button" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 70.0
+offset_top = 375.0
+offset_right = 110.0
+offset_bottom = 405.0
+theme_override_font_sizes/font_size = 18
+text = "+"
+
+[node name="CombatRateLabel" type="Label" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 420.0
+offset_right = 180.0
+offset_bottom = 450.0
+theme_override_colors/font_color = Color(0.8, 0.9, 1, 1)
+theme_override_font_sizes/font_size = 16
+text = "Combat: 33"
+
+[node name="CombatRateDecreaseBtn" type="Button" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 455.0
+offset_right = 60.0
+offset_bottom = 485.0
+theme_override_font_sizes/font_size = 18
+text = "-"
+
+[node name="CombatRateIncreaseBtn" type="Button" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 70.0
+offset_top = 455.0
+offset_right = 110.0
+offset_bottom = 485.0
+theme_override_font_sizes/font_size = 18
+text = "+"
+
+[node name="TreasureRateLabel" type="Label" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 500.0
+offset_right = 180.0
+offset_bottom = 530.0
+theme_override_colors/font_color = Color(0.8, 0.9, 1, 1)
+theme_override_font_sizes/font_size = 16
+text = "Treasure: 33"
+
+[node name="TreasureRateDecreaseBtn" type="Button" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 535.0
+offset_right = 60.0
+offset_bottom = 565.0
+theme_override_font_sizes/font_size = 18
+text = "-"
+
+[node name="TreasureRateIncreaseBtn" type="Button" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 70.0
+offset_top = 535.0
+offset_right = 110.0
+offset_bottom = 565.0
+theme_override_font_sizes/font_size = 18
+text = "+"
+
+[node name="MysteryRateLabel" type="Label" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 580.0
+offset_right = 180.0
+offset_bottom = 610.0
+theme_override_colors/font_color = Color(0.8, 0.9, 1, 1)
+theme_override_font_sizes/font_size = 16
+text = "Mystery: 34"
+
+[node name="MysteryRateDecreaseBtn" type="Button" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 615.0
+offset_right = 60.0
+offset_bottom = 645.0
+theme_override_font_sizes/font_size = 18
+text = "-"
+
+[node name="MysteryRateIncreaseBtn" type="Button" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 70.0
+offset_top = 615.0
+offset_right = 110.0
+offset_bottom = 645.0
+theme_override_font_sizes/font_size = 18
+text = "+"
+
+[node name="TradingRateLabel" type="Label" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 200.0
+offset_top = 420.0
+offset_right = 360.0
+offset_bottom = 450.0
+theme_override_colors/font_color = Color(0.8, 0.9, 1, 1)
+theme_override_font_sizes/font_size = 16
+text = "Trading: 15"
+
+[node name="TradingRateDecreaseBtn" type="Button" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 200.0
+offset_top = 455.0
+offset_right = 240.0
+offset_bottom = 485.0
+theme_override_font_sizes/font_size = 18
+text = "-"
+
+[node name="TradingRateIncreaseBtn" type="Button" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 250.0
+offset_top = 455.0
+offset_right = 290.0
+offset_bottom = 485.0
+theme_override_font_sizes/font_size = 18
+text = "+"
+
+[node name="MiningRateLabel" type="Label" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 200.0
+offset_top = 500.0
+offset_right = 360.0
+offset_bottom = 530.0
+theme_override_colors/font_color = Color(0.8, 0.9, 1, 1)
+theme_override_font_sizes/font_size = 16
+text = "Mining: 15"
+
+[node name="MiningRateDecreaseBtn" type="Button" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 200.0
+offset_top = 535.0
+offset_right = 240.0
+offset_bottom = 565.0
+theme_override_font_sizes/font_size = 18
+text = "-"
+
+[node name="MiningRateIncreaseBtn" type="Button" parent="UI/DebugControls"]
+layout_mode = 0
+offset_left = 250.0
+offset_top = 535.0
+offset_right = 290.0
+offset_bottom = 565.0
+theme_override_font_sizes/font_size = 18
+text = "+"
 
 [node name="ToCombatButton" type="Button" parent="UI"]
 offset_left = 980.0
@@ -75,262 +356,10 @@ offset_bottom = 110.0
 theme_override_font_sizes/font_size = 16
 text = "Deck Builder"
 
-[node name="ColumnsLabel" type="Label" parent="UI/DebugControls"]
-offset_left = 20.0
-offset_top = 20.0
-offset_right = 180.0
-offset_bottom = 50.0
-theme_override_colors/font_color = Color(0.8, 0.9, 1, 1)
-theme_override_font_sizes/font_size = 16
-text = "Columns: 8"
-
-[node name="ColumnsDecreaseBtn" type="Button" parent="UI/DebugControls"]
-offset_left = 20.0
-offset_top = 55.0
-offset_right = 60.0
-offset_bottom = 85.0
-theme_override_font_sizes/font_size = 18
-text = "-"
-
-[node name="ColumnsIncreaseBtn" type="Button" parent="UI/DebugControls"]
-offset_left = 70.0
-offset_top = 55.0
-offset_right = 110.0
-offset_bottom = 85.0
-theme_override_font_sizes/font_size = 18
-text = "+"
-
-[node name="MinRowsLabel" type="Label" parent="UI/DebugControls"]
-offset_left = 20.0
-offset_top = 100.0
-offset_right = 180.0
-offset_bottom = 130.0
-theme_override_colors/font_color = Color(0.8, 0.9, 1, 1)
-theme_override_font_sizes/font_size = 16
-text = "Min Rows: 3"
-
-[node name="MinRowsDecreaseBtn" type="Button" parent="UI/DebugControls"]
-offset_left = 20.0
-offset_top = 135.0
-offset_right = 60.0
-offset_bottom = 165.0
-theme_override_font_sizes/font_size = 18
-text = "-"
-
-[node name="MinRowsIncreaseBtn" type="Button" parent="UI/DebugControls"]
-offset_left = 70.0
-offset_top = 135.0
-offset_right = 110.0
-offset_bottom = 165.0
-theme_override_font_sizes/font_size = 18
-text = "+"
-
-[node name="MaxRowsLabel" type="Label" parent="UI/DebugControls"]
-offset_left = 20.0
-offset_top = 180.0
-offset_right = 180.0
-offset_bottom = 210.0
-theme_override_colors/font_color = Color(0.8, 0.9, 1, 1)
-theme_override_font_sizes/font_size = 16
-text = "Max Rows: 5"
-
-[node name="MaxRowsDecreaseBtn" type="Button" parent="UI/DebugControls"]
-offset_left = 20.0
-offset_top = 215.0
-offset_right = 60.0
-offset_bottom = 245.0
-theme_override_font_sizes/font_size = 18
-text = "-"
-
-[node name="MaxRowsIncreaseBtn" type="Button" parent="UI/DebugControls"]
-offset_left = 70.0
-offset_top = 215.0
-offset_right = 110.0
-offset_bottom = 245.0
-theme_override_font_sizes/font_size = 18
-text = "+"
-
-[node name="MinDistLabel" type="Label" parent="UI/DebugControls"]
-offset_left = 20.0
-offset_top = 260.0
-offset_right = 180.0
-offset_bottom = 290.0
-theme_override_colors/font_color = Color(0.8, 0.9, 1, 1)
-theme_override_font_sizes/font_size = 16
-text = "Min Dist: 100"
-
-[node name="MinDistDecreaseBtn" type="Button" parent="UI/DebugControls"]
-offset_left = 20.0
-offset_top = 295.0
-offset_right = 60.0
-offset_bottom = 325.0
-theme_override_font_sizes/font_size = 18
-text = "-"
-
-[node name="MinDistIncreaseBtn" type="Button" parent="UI/DebugControls"]
-offset_left = 70.0
-offset_top = 295.0
-offset_right = 110.0
-offset_bottom = 325.0
-theme_override_font_sizes/font_size = 18
-text = "+"
-
-[node name="MaxDistLabel" type="Label" parent="UI/DebugControls"]
-offset_left = 20.0
-offset_top = 340.0
-offset_right = 180.0
-offset_bottom = 370.0
-theme_override_colors/font_color = Color(0.8, 0.9, 1, 1)
-theme_override_font_sizes/font_size = 16
-text = "Max Dist: 500"
-
-[node name="MaxDistDecreaseBtn" type="Button" parent="UI/DebugControls"]
-offset_left = 20.0
-offset_top = 375.0
-offset_right = 60.0
-offset_bottom = 405.0
-theme_override_font_sizes/font_size = 18
-text = "-"
-
-[node name="MaxDistIncreaseBtn" type="Button" parent="UI/DebugControls"]
-offset_left = 70.0
-offset_top = 375.0
-offset_right = 110.0
-offset_bottom = 405.0
-theme_override_font_sizes/font_size = 18
-text = "+"
-
-[node name="CombatRateLabel" type="Label" parent="UI/DebugControls"]
-offset_left = 20.0
-offset_top = 420.0
-offset_right = 180.0
-offset_bottom = 450.0
-theme_override_colors/font_color = Color(0.8, 0.9, 1, 1)
-theme_override_font_sizes/font_size = 16
-text = "Combat: 33"
-
-[node name="CombatRateDecreaseBtn" type="Button" parent="UI/DebugControls"]
-offset_left = 20.0
-offset_top = 455.0
-offset_right = 60.0
-offset_bottom = 485.0
-theme_override_font_sizes/font_size = 18
-text = "-"
-
-[node name="CombatRateIncreaseBtn" type="Button" parent="UI/DebugControls"]
-offset_left = 70.0
-offset_top = 455.0
-offset_right = 110.0
-offset_bottom = 485.0
-theme_override_font_sizes/font_size = 18
-text = "+"
-
-[node name="TreasureRateLabel" type="Label" parent="UI/DebugControls"]
-offset_left = 20.0
-offset_top = 500.0
-offset_right = 180.0
-offset_bottom = 530.0
-theme_override_colors/font_color = Color(0.8, 0.9, 1, 1)
-theme_override_font_sizes/font_size = 16
-text = "Treasure: 33"
-
-[node name="TreasureRateDecreaseBtn" type="Button" parent="UI/DebugControls"]
-offset_left = 20.0
-offset_top = 535.0
-offset_right = 60.0
-offset_bottom = 565.0
-theme_override_font_sizes/font_size = 18
-text = "-"
-
-[node name="TreasureRateIncreaseBtn" type="Button" parent="UI/DebugControls"]
-offset_left = 70.0
-offset_top = 535.0
-offset_right = 110.0
-offset_bottom = 565.0
-theme_override_font_sizes/font_size = 18
-text = "+"
-
-[node name="MysteryRateLabel" type="Label" parent="UI/DebugControls"]
-offset_left = 20.0
-offset_top = 580.0
-offset_right = 180.0
-offset_bottom = 610.0
-theme_override_colors/font_color = Color(0.8, 0.9, 1, 1)
-theme_override_font_sizes/font_size = 16
-text = "Mystery: 34"
-
-[node name="MysteryRateDecreaseBtn" type="Button" parent="UI/DebugControls"]
-offset_left = 20.0
-offset_top = 615.0
-offset_right = 60.0
-offset_bottom = 645.0
-theme_override_font_sizes/font_size = 18
-text = "-"
-
-[node name="MysteryRateIncreaseBtn" type="Button" parent="UI/DebugControls"]
-offset_left = 70.0
-offset_top = 615.0
-offset_right = 110.0
-offset_bottom = 645.0
-theme_override_font_sizes/font_size = 18
-text = "+"
-
-[node name="TradingRateLabel" type="Label" parent="UI/DebugControls"]
-offset_left = 200.0
-offset_top = 420.0
-offset_right = 360.0
-offset_bottom = 450.0
-theme_override_colors/font_color = Color(0.8, 0.9, 1, 1)
-theme_override_font_sizes/font_size = 16
-text = "Trading: 15"
-
-[node name="TradingRateDecreaseBtn" type="Button" parent="UI/DebugControls"]
-offset_left = 200.0
-offset_top = 455.0
-offset_right = 240.0
-offset_bottom = 485.0
-theme_override_font_sizes/font_size = 18
-text = "-"
-
-[node name="TradingRateIncreaseBtn" type="Button" parent="UI/DebugControls"]
-offset_left = 250.0
-offset_top = 455.0
-offset_right = 290.0
-offset_bottom = 485.0
-theme_override_font_sizes/font_size = 18
-text = "+"
-
-[node name="MiningRateLabel" type="Label" parent="UI/DebugControls"]
-offset_left = 200.0
-offset_top = 500.0
-offset_right = 360.0
-offset_bottom = 530.0
-theme_override_colors/font_color = Color(0.8, 0.9, 1, 1)
-theme_override_font_sizes/font_size = 16
-text = "Mining: 15"
-
-[node name="MiningRateDecreaseBtn" type="Button" parent="UI/DebugControls"]
-offset_left = 200.0
-offset_top = 535.0
-offset_right = 240.0
-offset_bottom = 565.0
-theme_override_font_sizes/font_size = 18
-text = "-"
-
-[node name="MiningRateIncreaseBtn" type="Button" parent="UI/DebugControls"]
-offset_left = 250.0
-offset_top = 535.0
-offset_right = 290.0
-offset_bottom = 565.0
-theme_override_font_sizes/font_size = 18
-text = "+"
-
 [node name="TooltipContainer" type="Control" parent="UI"]
 visible = false
 layout_mode = 3
 anchors_preset = 0
-offset_left = 0.0
-offset_top = 0.0
 offset_right = 200.0
 offset_bottom = 60.0
 

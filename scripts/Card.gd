@@ -21,18 +21,39 @@ const DRAG_SCALE: float = 1.25
 const NORMAL_Z_INDEX: int = 0
 const DRAG_Z_INDEX: int = 100
 
+# Display mode
+enum DisplayMode { SHORT, FULL }
+var current_display_mode: DisplayMode = DisplayMode.SHORT
+
+# Hover detection for popup
+var hover_timer: Timer = null
+const HOVER_TIME_THRESHOLD: float = 0.5  # 0.5 seconds for long hover
+var is_mouse_over: bool = false
+var hover_popup: Control = null
+
 signal card_drag_started(card: Control)
 signal card_drag_ended(card: Control, dropped_position: Vector2)
 signal card_played(card: Control, target)
 
 func _ready():
 	mouse_filter = Control.MOUSE_FILTER_STOP
-	
+
 	# Get node references
 	name_label = $Content/VBox/NameLabel
 	artwork_texture = $Content/VBox/ArtworkContainer/ArtworkTexture
 	description_label = $Content/VBox/DescriptionContainer/DescriptionLabel
-	
+
+	# Setup hover timer
+	hover_timer = Timer.new()
+	hover_timer.wait_time = HOVER_TIME_THRESHOLD
+	hover_timer.one_shot = true
+	hover_timer.timeout.connect(_on_hover_timeout)
+	add_child(hover_timer)
+
+	# Connect mouse enter/exit signals
+	mouse_entered.connect(_on_mouse_entered)
+	mouse_exited.connect(_on_mouse_exited)
+
 	# If card data was set before _ready, update visuals now
 	if not card_data.is_empty():
 		update_visuals()
@@ -49,22 +70,37 @@ func update_visuals():
 	"""Update visual elements based on card data"""
 	if card_data.is_empty():
 		return
-	
-	# Set card name
-	if name_label:
-		name_label.text = card_data.get("card_name", "Unknown")
-	
-	# Load and set artwork
-	if artwork_texture:
-		var sprite_path = card_data.get("sprite_path", "")
-		if sprite_path != "":
-			var texture = load(sprite_path)
-			if texture:
-				artwork_texture.texture = texture
-	
-	# Set description
-	if description_label:
-		description_label.text = card_data.get("card_description", "")
+
+	if current_display_mode == DisplayMode.SHORT:
+		# Short mode: show only short description
+		if name_label:
+			name_label.visible = false
+
+		if artwork_texture:
+			artwork_texture.visible = false
+
+		if description_label:
+			description_label.text = card_data.get("card_short_description", "")
+			description_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			description_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	else:
+		# Full mode: show all details
+		if name_label:
+			name_label.visible = true
+			name_label.text = card_data.get("card_name", "Unknown")
+
+		if artwork_texture:
+			artwork_texture.visible = true
+			var sprite_path = card_data.get("sprite_path", "")
+			if sprite_path != "":
+				var texture = load(sprite_path)
+				if texture:
+					artwork_texture.texture = texture
+
+		if description_label:
+			description_label.text = card_data.get("card_rules_description", "")
+			description_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+			description_label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
 
 func _input(event: InputEvent):
 	if event is InputEventMouseButton:
@@ -92,19 +128,23 @@ func start_drag(click_position: Vector2):
 	"""Start dragging the card"""
 	if is_being_dragged:
 		return
-	
+
 	is_being_dragged = true
+	# Hide any hover popup when dragging starts
+	hover_timer.stop()
+	hide_hover_popup()
+
 	# Offset card below cursor for better visibility (50 pixels down)
 	drag_offset = Vector2(size.x / 2, -50)
 	original_position = global_position
 	original_parent = get_parent()
 	original_index = get_index()
-	
+
 	# Visual feedback
 	scale = Vector2(DRAG_SCALE, DRAG_SCALE)
 	z_index = DRAG_Z_INDEX
 	modulate.a = 0.7  # Semi-transparent during drag
-	
+
 	# Reparent to root for free movement
 	var canvas_layer = get_canvas_layer_root()
 	if canvas_layer:
@@ -112,7 +152,7 @@ func start_drag(click_position: Vector2):
 		get_parent().remove_child(self)
 		canvas_layer.add_child(self)
 		global_position = temp_global_pos
-	
+
 	card_drag_started.emit(self)
 
 func update_drag_position():
@@ -199,3 +239,61 @@ func get_card_name() -> String:
 func get_card_function() -> String:
 	"""Get the function name to execute when card is played"""
 	return card_data.get("card_function", "")
+
+func _on_mouse_entered():
+	"""Called when mouse enters the card"""
+	if not is_being_dragged and current_display_mode == DisplayMode.SHORT:
+		is_mouse_over = true
+		hover_timer.start()
+
+func _on_mouse_exited():
+	"""Called when mouse exits the card"""
+	is_mouse_over = false
+	hover_timer.stop()
+	hide_hover_popup()
+
+func _on_hover_timeout():
+	"""Called after hovering for HOVER_TIME_THRESHOLD seconds"""
+	if is_mouse_over and not is_being_dragged:
+		show_hover_popup()
+
+func show_hover_popup():
+	"""Display a larger version of the card above the mouse"""
+	if hover_popup:
+		return  # Already showing
+
+	# Create a new card instance for the popup
+	var popup_card = card_scene.instantiate() if card_scene else null
+	if not popup_card:
+		return
+
+	# Setup popup card with same data but in FULL display mode
+	popup_card.card_data = card_data.duplicate()
+	popup_card.current_display_mode = DisplayMode.FULL
+	popup_card.mouse_filter = Control.MOUSE_FILTER_IGNORE  # Don't intercept mouse
+
+	# Scale up the popup
+	popup_card.scale = Vector2(1.5, 1.5)
+	popup_card.z_index = 1000  # Very high to appear above everything
+
+	# Add to root canvas layer
+	var canvas_layer = get_canvas_layer_root()
+	if canvas_layer:
+		canvas_layer.add_child(popup_card)
+
+		# Position above the mouse cursor
+		var mouse_pos = get_global_mouse_position()
+		var popup_size = popup_card.size * popup_card.scale
+		# Position centered horizontally, above cursor
+		popup_card.global_position = mouse_pos - Vector2(popup_size.x / 2, popup_size.y + 20)
+
+		hover_popup = popup_card
+		popup_card.update_visuals()
+
+func hide_hover_popup():
+	"""Hide and remove the hover popup"""
+	if hover_popup:
+		hover_popup.queue_free()
+		hover_popup = null
+
+var card_scene: PackedScene = preload("res://scenes/Card.tscn")
