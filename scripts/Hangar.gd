@@ -41,6 +41,13 @@ var assigned_pilots: Dictionary = {}  # ship_index -> call_sign
 var dragging_pilot: Control = null
 var drop_target_ship_index: int = -1
 
+# Dragging from ship (for reassignment)
+var dragging_from_ship: bool = false
+var dragging_source_ship_index: int = -1
+var dragging_pilot_call_sign: String = ""
+var dragging_ship_portrait: Control = null  # The visual copy being dragged
+var drop_target_is_barracks: bool = false
+
 # Ship display configuration
 const SHIP_BOX_SIZE = 96
 const SLOT_SIZE = 20
@@ -198,7 +205,7 @@ func create_ship_display(ship_data: Dictionary, ship_index: int):
 			portrait.set_anchors_preset(Control.PRESET_FULL_RECT)
 			portrait.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
 			portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-			portrait.mouse_filter = Control.MOUSE_FILTER_STOP  # Enable mouse events for tooltip
+			portrait.mouse_filter = Control.MOUSE_FILTER_STOP  # Enable mouse events for tooltip and dragging
 
 			# Load portrait texture
 			var portrait_path = pilot_data.get("portrait_path", "")
@@ -227,6 +234,13 @@ func create_ship_display(ship_data: Dictionary, ship_index: int):
 				tooltip_parts.append("%s" % ability_effect)
 
 			portrait.tooltip_text = "\n".join(tooltip_parts)
+
+			# Store metadata for drag functionality
+			portrait.set_meta("ship_index", ship_index)
+			portrait.set_meta("call_sign", call_sign)
+
+			# Connect drag input
+			portrait.gui_input.connect(_on_ship_pilot_gui_input.bind(portrait))
 
 			pilot_slot_container.add_child(portrait)
 
@@ -291,6 +305,7 @@ func update_pilot_slot_visual(ship_index: int):
 	portrait.set_anchors_preset(Control.PRESET_FULL_RECT)
 	portrait.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
 	portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	portrait.mouse_filter = Control.MOUSE_FILTER_STOP  # Enable mouse events for dragging
 
 	# Load portrait texture
 	var portrait_path = pilot_data.get("portrait_path", "")
@@ -298,6 +313,13 @@ func update_pilot_slot_visual(ship_index: int):
 		var texture = load(portrait_path)
 		if texture:
 			portrait.texture = texture
+
+	# Store metadata for drag functionality
+	portrait.set_meta("ship_index", ship_index)
+	portrait.set_meta("call_sign", call_sign)
+
+	# Connect drag input
+	portrait.gui_input.connect(_on_ship_pilot_gui_input.bind(portrait))
 
 	pilot_slot.add_child(portrait)
 
@@ -378,6 +400,9 @@ func _process(_delta):
 	"""Check for drop targets while dragging"""
 	if dragging_pilot:
 		check_drop_targets()
+	elif dragging_from_ship:
+		update_ship_pilot_drag_position()
+		check_ship_pilot_drop_targets()
 
 func check_drop_targets():
 	"""Check if dragging pilot is over a valid ship slot"""
@@ -417,6 +442,142 @@ func assign_pilot_to_ship(pilot_call_sign: String, ship_index: int):
 	# Refresh displays
 	update_pilot_page_display()
 	update_ship_page_display()
+
+# ============================================================================
+# SHIP PILOT DRAG AND DROP (Reassignment)
+# ============================================================================
+
+func _input(event: InputEvent):
+	"""Handle global mouse release for ship pilot dragging"""
+	if event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+			if dragging_from_ship:
+				end_ship_pilot_drag()
+
+func _on_ship_pilot_gui_input(event: InputEvent, portrait: Control):
+	"""Handle mouse input on assigned pilot portraits"""
+	if event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+			var ship_index = portrait.get_meta("ship_index")
+			var call_sign = portrait.get_meta("call_sign")
+			start_ship_pilot_drag(portrait, ship_index, call_sign)
+			get_viewport().set_input_as_handled()
+
+func start_ship_pilot_drag(portrait: Control, ship_index: int, call_sign: String):
+	"""Start dragging a pilot from a ship"""
+	if dragging_from_ship:
+		return
+
+	dragging_from_ship = true
+	dragging_source_ship_index = ship_index
+	dragging_pilot_call_sign = call_sign
+
+	print("Hangar: Started dragging pilot ", call_sign, " from ship ", ship_index)
+
+	# Create visual copy of the portrait
+	dragging_ship_portrait = TextureRect.new()
+	dragging_ship_portrait.texture = portrait.texture
+	dragging_ship_portrait.custom_minimum_size = Vector2(64, 64)  # Larger size for visibility
+	dragging_ship_portrait.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
+	dragging_ship_portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	dragging_ship_portrait.modulate.a = 0.8
+	dragging_ship_portrait.z_index = 100
+
+	# Add to UI canvas layer for free movement
+	var ui_layer = $UI
+	if ui_layer:
+		ui_layer.add_child(dragging_ship_portrait)
+		dragging_ship_portrait.global_position = get_viewport().get_mouse_position() - Vector2(32, 32)
+
+	# Make original portrait semi-transparent
+	portrait.modulate.a = 0.3
+
+func update_ship_pilot_drag_position():
+	"""Update the visual copy position to follow mouse"""
+	if dragging_ship_portrait:
+		var mouse_pos = get_viewport().get_mouse_position()
+		dragging_ship_portrait.global_position = mouse_pos - Vector2(32, 32)
+
+func check_ship_pilot_drop_targets():
+	"""Check if dragging ship pilot is over a valid drop zone"""
+	var mouse_pos = get_viewport().get_mouse_position()
+
+	# Reset drop targets
+	drop_target_ship_index = -1
+	drop_target_is_barracks = false
+
+	# Check if over barracks panel
+	var barracks_panel = $UI/BarracksPanel
+	if barracks_panel:
+		var barracks_rect = Rect2(barracks_panel.global_position, barracks_panel.size)
+		if barracks_rect.has_point(mouse_pos):
+			drop_target_is_barracks = true
+			return
+
+	# Check if over a ship container
+	for i in range(ship_containers.size()):
+		var container = ship_containers[i]
+		var rect = Rect2(container.global_position, container.size)
+
+		if rect.has_point(mouse_pos):
+			drop_target_ship_index = container.get_meta("ship_index")
+			break
+
+func end_ship_pilot_drag():
+	"""End ship pilot drag and handle assignment"""
+	if not dragging_from_ship:
+		return
+
+	var call_sign = dragging_pilot_call_sign
+	var source_ship = dragging_source_ship_index
+
+	print("Hangar: Ending ship pilot drag - barracks: ", drop_target_is_barracks, ", ship: ", drop_target_ship_index)
+
+	if drop_target_is_barracks:
+		# Unassign pilot - return to barracks
+		print("Hangar: Unassigning pilot ", call_sign, " from ship ", source_ship)
+		assigned_pilots.erase(source_ship)
+		available_pilots.append(call_sign)
+
+		# Refresh displays
+		update_pilot_page_display()
+		update_ship_page_display()
+
+	elif drop_target_ship_index >= 0 and drop_target_ship_index != source_ship:
+		# Reassign to different ship
+		print("Hangar: Reassigning pilot ", call_sign, " from ship ", source_ship, " to ship ", drop_target_ship_index)
+
+		# Remove from old ship
+		assigned_pilots.erase(source_ship)
+
+		# If target ship has a pilot, swap them or move them to barracks
+		if assigned_pilots.has(drop_target_ship_index):
+			var swapped_pilot = assigned_pilots[drop_target_ship_index]
+			print("Hangar: Moving existing pilot ", swapped_pilot, " to barracks")
+			available_pilots.append(swapped_pilot)
+
+		# Assign to new ship
+		assigned_pilots[drop_target_ship_index] = call_sign
+
+		# Refresh displays
+		update_pilot_page_display()
+		update_ship_page_display()
+
+	else:
+		# Invalid drop - restore original assignment (do nothing, just refresh display)
+		print("Hangar: Invalid drop, pilot ", call_sign, " stays on ship ", source_ship)
+		update_ship_page_display()
+
+	# Clean up drag state
+	if dragging_ship_portrait:
+		dragging_ship_portrait.queue_free()
+		dragging_ship_portrait = null
+
+	dragging_from_ship = false
+	dragging_source_ship_index = -1
+	dragging_pilot_call_sign = ""
+	drop_target_is_barracks = false
+	drop_target_ship_index = -1
 
 # ============================================================================
 # BUTTON HANDLERS

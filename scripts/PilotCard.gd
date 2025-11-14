@@ -17,7 +17,18 @@ var drag_offset: Vector2 = Vector2.ZERO
 var original_position: Vector2 = Vector2.ZERO
 var original_parent: Node = null
 var original_index: int = -1
-var placeholder: Control = null  # Placeholder to keep spot in grid
+var placeholder: Control = null  # Placeholder to keep spot in grid (legacy system)
+var drag_visual_copy: Control = null  # Visual copy for dragging (new system)
+
+# Drag behavior configuration
+## USE_VISUAL_COPY_DRAG: Controls drag-and-drop behavior
+## - true: Creates a visual copy that follows cursor, original stays invisible in place
+##         This reserves the slot automatically and provides cleaner visual feedback
+##         Recommended for pilot and upgrade cards
+## - false: Uses placeholder system where original card is reparented during drag
+##          Placeholder maintains grid position, original animates back on invalid drop
+##          Legacy behavior, kept for backwards compatibility
+const USE_VISUAL_COPY_DRAG: bool = true
 
 # Visual settings
 const DRAG_SCALE = Vector2(1.15, 1.15)
@@ -102,34 +113,63 @@ func start_drag():
 	original_index = get_index()
 	drag_offset = Vector2(size.x / 2, size.y / 2)
 
-	# Create invisible placeholder to keep spot in grid
-	placeholder = Control.new()
-	placeholder.custom_minimum_size = custom_minimum_size
-	placeholder.visible = false
+	if USE_VISUAL_COPY_DRAG:
+		# NEW SYSTEM: Visual copy drag
+		# Original stays invisible in place, copy follows cursor
 
-	# Insert placeholder at current position
-	original_parent.add_child(placeholder)
-	original_parent.move_child(placeholder, original_index)
+		# Create visual copy
+		drag_visual_copy = duplicate(0)  # Duplicate without children signals
+		drag_visual_copy.scale = DRAG_SCALE
+		drag_visual_copy.z_index = DRAG_Z_INDEX
+		drag_visual_copy.modulate.a = 0.8
 
-	# Visual feedback
-	scale = DRAG_SCALE
-	z_index = DRAG_Z_INDEX
-	modulate.a = 0.8
+		# Add copy to canvas layer for free movement
+		var canvas_layer = get_canvas_layer_root()
+		if canvas_layer:
+			canvas_layer.add_child(drag_visual_copy)
+			drag_visual_copy.global_position = global_position
 
-	# Reparent to move freely
-	var canvas_layer = get_canvas_layer_root()
-	if canvas_layer:
-		var old_global_pos = global_position
-		original_parent.remove_child(self)
-		canvas_layer.add_child(self)
-		global_position = old_global_pos
+		# Make original invisible but keep it in place
+		modulate.a = 0.0
+		mouse_filter = Control.MOUSE_FILTER_IGNORE  # Prevent clicks on invisible original
+	else:
+		# LEGACY SYSTEM: Placeholder drag
+		# Original is reparented and moves, placeholder keeps slot
+
+		# Create invisible placeholder to keep spot in grid
+		placeholder = Control.new()
+		placeholder.custom_minimum_size = custom_minimum_size
+		placeholder.visible = false
+
+		# Insert placeholder at current position
+		original_parent.add_child(placeholder)
+		original_parent.move_child(placeholder, original_index)
+
+		# Visual feedback
+		scale = DRAG_SCALE
+		z_index = DRAG_Z_INDEX
+		modulate.a = 0.8
+
+		# Reparent to move freely
+		var canvas_layer = get_canvas_layer_root()
+		if canvas_layer:
+			var old_global_pos = global_position
+			original_parent.remove_child(self)
+			canvas_layer.add_child(self)
+			global_position = old_global_pos
 
 	drag_started.emit(self)
 
 func update_drag_position():
 	"""Update position to follow mouse"""
 	var mouse_pos = get_viewport().get_mouse_position()
-	global_position = mouse_pos - drag_offset
+
+	if USE_VISUAL_COPY_DRAG and drag_visual_copy:
+		# Move the visual copy
+		drag_visual_copy.global_position = mouse_pos - drag_offset
+	else:
+		# Move the original card (legacy system)
+		global_position = mouse_pos - drag_offset
 
 func end_drag():
 	"""End dragging and check for valid drop"""
@@ -145,10 +185,17 @@ func end_drag():
 		dropped_ship_index = hangar.drop_target_ship_index
 
 	if dropped_ship_index >= 0:
-		# Valid drop on ship - clean up placeholder
-		if placeholder:
-			placeholder.queue_free()
-			placeholder = null
+		# Valid drop on ship
+		if USE_VISUAL_COPY_DRAG:
+			# Clean up visual copy
+			if drag_visual_copy:
+				drag_visual_copy.queue_free()
+				drag_visual_copy = null
+		else:
+			# Clean up placeholder
+			if placeholder:
+				placeholder.queue_free()
+				placeholder = null
 
 		dropped_on_ship.emit(self, dropped_ship_index)
 		hangar.assign_pilot_to_ship(call_sign, dropped_ship_index)
@@ -169,32 +216,57 @@ func get_hangar():
 
 func return_to_barracks():
 	"""Smoothly return to original position in barracks"""
-	# Restore visual state immediately
-	scale = NORMAL_SCALE
-	z_index = NORMAL_Z_INDEX
-	modulate.a = 1.0
+	if USE_VISUAL_COPY_DRAG:
+		# NEW SYSTEM: Animate visual copy back, then restore original
+		if drag_visual_copy:
+			# Animate visual copy back to original position
+			var tween = create_tween()
+			tween.set_ease(Tween.EASE_OUT)
+			tween.set_trans(Tween.TRANS_CUBIC)
+			tween.tween_property(drag_visual_copy, "global_position", global_position, 0.3)
+			tween.parallel().tween_property(drag_visual_copy, "modulate:a", 0.0, 0.3)
 
-	# Reparent back to original parent
-	if original_parent and placeholder:
-		var canvas_layer = get_parent()
-		var placeholder_index = placeholder.get_index()
+			# When animation completes, clean up visual copy and restore original
+			tween.tween_callback(func():
+				if drag_visual_copy:
+					drag_visual_copy.queue_free()
+					drag_visual_copy = null
+				# Restore original visibility
+				modulate.a = 1.0
+				mouse_filter = Control.MOUSE_FILTER_STOP
+			)
+		else:
+			# No visual copy somehow, just restore original
+			modulate.a = 1.0
+			mouse_filter = Control.MOUSE_FILTER_STOP
+	else:
+		# LEGACY SYSTEM: Reparent original back and animate
+		# Restore visual state immediately
+		scale = NORMAL_SCALE
+		z_index = NORMAL_Z_INDEX
+		modulate.a = 1.0
 
-		# Remove from canvas
-		canvas_layer.remove_child(self)
+		# Reparent back to original parent
+		if original_parent and placeholder:
+			var canvas_layer = get_parent()
+			var placeholder_index = placeholder.get_index()
 
-		# Add back to grid at placeholder position
-		original_parent.add_child(self)
-		original_parent.move_child(self, placeholder_index)
+			# Remove from canvas
+			canvas_layer.remove_child(self)
 
-		# Remove placeholder
-		placeholder.queue_free()
-		placeholder = null
+			# Add back to grid at placeholder position
+			original_parent.add_child(self)
+			original_parent.move_child(self, placeholder_index)
 
-		# Animate back to position
-		var tween = create_tween()
-		tween.set_ease(Tween.EASE_OUT)
-		tween.set_trans(Tween.TRANS_CUBIC)
-		tween.tween_property(self, "position", Vector2.ZERO, 0.3)
+			# Remove placeholder
+			placeholder.queue_free()
+			placeholder = null
+
+			# Animate back to position
+			var tween = create_tween()
+			tween.set_ease(Tween.EASE_OUT)
+			tween.set_trans(Tween.TRANS_CUBIC)
+			tween.tween_property(self, "position", Vector2.ZERO, 0.3)
 
 func assign_to_ship():
 	"""Called when successfully assigned to a ship"""
