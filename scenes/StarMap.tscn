@@ -356,6 +356,14 @@ offset_bottom = 110.0
 theme_override_font_sizes/font_size = 16
 text = "Deck Builder"
 
+[node name="HangarButton" type="Button" parent="UI"]
+offset_left = 980.0
+offset_top = 170.0
+offset_right = 1130.0
+offset_bottom = 210.0
+theme_override_font_sizes/font_size = 16
+text = "Hangar"
+
 [node name="TooltipContainer" type="Control" parent="UI"]
 visible = false
 layout_mode = 3

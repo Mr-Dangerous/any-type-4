@@ -50,6 +50,7 @@ var is_player_moving: bool = false
 @onready var camera: Camera2D = $Camera2D
 @onready var to_combat_button: Button = $UI/ToCombatButton
 @onready var deck_builder_button: Button = $UI/DeckBuilderButton
+@onready var hangar_button: Button = $UI/HangarButton
 @onready var debug_map_button: Button = $UI/DebugMapButton
 @onready var debug_controls: Control = $UI/DebugControls
 @onready var refresh_button: Button = $UI/DebugControls/RefreshButton
@@ -111,6 +112,7 @@ func _ready():
 
 	to_combat_button.pressed.connect(_on_to_combat)
 	deck_builder_button.pressed.connect(_on_deck_builder)
+	hangar_button.pressed.connect(_on_hangar)
 	debug_map_button.pressed.connect(_on_toggle_debug_controls)
 	refresh_button.pressed.connect(_on_refresh_starmap)
 	parallel_path_button.pressed.connect(_on_toggle_parallel_paths)
@@ -958,6 +960,9 @@ func _on_to_combat():
 
 func _on_deck_builder():
 	get_tree().change_scene_to_file("res://scenes/DeckBuilder.tscn")
+
+func _on_hangar():
+	get_tree().change_scene_to_file("res://scenes/Hangar.tscn")
 
 func _on_toggle_debug_controls():
 	debug_controls.visible = not debug_controls.visible

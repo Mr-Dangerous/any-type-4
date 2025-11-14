@@ -7,16 +7,21 @@ extends Node
 # CSV file paths
 const SHIP_DATABASE_PATH = "res://card_database/ship_database.csv"
 const STARTING_DECK_PATH = "res://card_database/starting_deck.csv"
+const STARTING_SHIPS_PATH = "res://card_database/starting_ships.csv"
+const PILOT_DATABASE_PATH = "res://card_database/pilot_database.csv"
+const STARTING_PILOTS_PATH = "res://card_database/starting_pilots.csv"
 const STAR_NAMES_PATH = "res://card_database/star_names.csv"
 const CARD_DATABASE_PATH = "res://card_database/card_database.csv"
 
 # Cached data
 var ships: Dictionary = {}  # ship_id -> ship_data
+var pilots: Dictionary = {}  # call_sign -> pilot_data
 var star_names: Array[String] = []
 var cards: Dictionary = {}  # card_name -> card_data
 
 # Loading status flags
 var ships_loaded: bool = false
+var pilots_loaded: bool = false
 var star_names_loaded: bool = false
 var cards_loaded: bool = false
 
@@ -27,6 +32,7 @@ func _ready():
 func load_all_databases():
 	"""Load all CSV databases on startup"""
 	load_ship_database()
+	load_pilot_database()
 	load_star_names()
 	load_card_database()
 	print("DataManager: All databases loaded")
@@ -166,6 +172,115 @@ func get_enabled_ships() -> Array[Dictionary]:
 	return enabled_ships
 
 # ============================================================================
+# PILOT DATABASE
+# ============================================================================
+
+func load_pilot_database() -> bool:
+	"""Load pilot data from pilot_database.csv"""
+	print("DataManager: Loading pilot database from: ", PILOT_DATABASE_PATH)
+
+	var file = FileAccess.open(PILOT_DATABASE_PATH, FileAccess.READ)
+	if file == null:
+		push_error("DataManager: Could not open pilot database: " + PILOT_DATABASE_PATH)
+		return false
+
+	# Read header
+	var header = file.get_csv_line()
+	if header.is_empty():
+		push_error("DataManager: Pilot database is empty")
+		file.close()
+		return false
+
+	# Parse data lines
+	var pilot_count = 0
+	while not file.eof_reached():
+		var line = file.get_csv_line()
+
+		# Skip empty lines
+		if line.is_empty() or (line.size() == 1 and line[0] == ""):
+			continue
+
+		# Parse pilot data
+		var pilot_data = parse_pilot_data(header, line)
+		if not pilot_data.is_empty():
+			var call_sign = pilot_data.get("call_sign", "")
+			if call_sign != "":
+				pilots[call_sign] = pilot_data
+				pilot_count += 1
+
+	file.close()
+	pilots_loaded = true
+	print("DataManager: Loaded ", pilot_count, " pilots")
+	return true
+
+func parse_pilot_data(header: Array, line: Array) -> Dictionary:
+	"""Parse a single pilot CSV line into a dictionary"""
+	var pilot_data = {}
+
+	# Map CSV columns to dictionary keys
+	for i in range(min(header.size(), line.size())):
+		var column_name = header[i]
+		var value = line[i]
+
+		# Parse value based on column type
+		match column_name:
+			"call_sign", "first_name", "last_name", "passive_ability", "ability_effect", "rarity", "portrait_path":
+				pilot_data[column_name] = value
+
+			"enabled":
+				pilot_data[column_name] = value.to_lower() == "true" or value == "1"
+
+	return pilot_data
+
+func get_pilot_data(call_sign: String) -> Dictionary:
+	"""Get pilot data by call_sign"""
+	if not pilots_loaded:
+		push_warning("DataManager: Pilot database not loaded yet")
+		return {}
+
+	if not pilots.has(call_sign):
+		push_warning("DataManager: Pilot not found: " + call_sign)
+		return {}
+
+	return pilots[call_sign]
+
+func get_all_pilots() -> Array[Dictionary]:
+	"""Get all pilot data"""
+	var all_pilots: Array[Dictionary] = []
+	for call_sign in pilots.keys():
+		all_pilots.append(pilots[call_sign])
+	return all_pilots
+
+func get_enabled_pilots() -> Array[Dictionary]:
+	"""Get all enabled pilots"""
+	var enabled_pilots: Array[Dictionary] = []
+	for call_sign in pilots.keys():
+		var pilot_data = pilots[call_sign]
+		if pilot_data.get("enabled", true):
+			enabled_pilots.append(pilot_data)
+	return enabled_pilots
+
+func load_starting_pilots() -> Array[String]:
+	"""Load starting pilots from starting_pilots.csv and return call signs"""
+	print("DataManager: Loading starting pilots from: ", STARTING_PILOTS_PATH)
+
+	var pilot_call_signs: Array[String] = []
+	var file = FileAccess.open(STARTING_PILOTS_PATH, FileAccess.READ)
+	if file == null:
+		push_error("DataManager: Could not open starting pilots: " + STARTING_PILOTS_PATH)
+		return pilot_call_signs
+
+	# Read call signs (no header in this CSV)
+	while not file.eof_reached():
+		var line = file.get_csv_line()
+		if line.size() > 0 and line[0] != "":
+			pilot_call_signs.append(line[0])
+
+	file.close()
+	print("DataManager: Loaded ", pilot_call_signs.size(), " starting pilots")
+	return pilot_call_signs
+
+# ============================================================================
 # CARD DATABASE
 # ============================================================================
 
@@ -263,6 +378,26 @@ func load_starting_deck() -> Array[String]:
 	print("DataManager: Loaded starting deck with ", deck_card_names.size(), " cards")
 	return deck_card_names
 
+func load_starting_ships() -> Array[String]:
+	"""Load starting ships from starting_ships.csv and return ship IDs"""
+	print("DataManager: Loading starting ships from: ", STARTING_SHIPS_PATH)
+
+	var ship_ids: Array[String] = []
+	var file = FileAccess.open(STARTING_SHIPS_PATH, FileAccess.READ)
+	if file == null:
+		push_error("DataManager: Could not open starting ships: " + STARTING_SHIPS_PATH)
+		return ship_ids
+
+	# Read ship IDs (no header in this CSV)
+	while not file.eof_reached():
+		var line = file.get_csv_line()
+		if line.size() > 0 and line[0] != "":
+			ship_ids.append(line[0])
+
+	file.close()
+	print("DataManager: Loaded ", ship_ids.size(), " starting ships")
+	return ship_ids
+
 # ============================================================================
 # STAR NAMES DATABASE
 # ============================================================================
@@ -310,10 +445,12 @@ func reload_all_databases():
 	"""Reload all CSV databases (useful for development)"""
 	print("DataManager: Reloading all databases...")
 	ships.clear()
+	pilots.clear()
 	star_names.clear()
 	cards.clear()
 
 	ships_loaded = false
+	pilots_loaded = false
 	star_names_loaded = false
 	cards_loaded = false
 
@@ -321,4 +458,4 @@ func reload_all_databases():
 
 func is_all_data_loaded() -> bool:
 	"""Check if all databases are loaded"""
-	return ships_loaded and star_names_loaded and cards_loaded
+	return ships_loaded and pilots_loaded and star_names_loaded and cards_loaded
