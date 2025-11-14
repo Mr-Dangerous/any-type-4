@@ -633,6 +633,65 @@ TODO: The  UI has two additionlal resources, needs a proper window, and also nee
   - Pathfinding around obstacles (beta version)
   - Diagonal movement options
   - Different movement patterns per enemy type
+
+### 2.24 Enemy Manager & Auto-Spawn System ✓ COMPLETED
+- [x] CombatEnemyManager module (scripts/CombatEnemyManager.gd)
+  - Standalone manager class for enemy spawning and movement
+  - Initialized by Combat_2 (not autoload)
+  - Reference to parent combat scene for grid/lane access
+  - ~370 lines of enemy-specific logic
+- [x] Auto-spawn button
+  - "AUTO SPAWN: OFF/ON" toggle button at (0, 500)
+  - Enables/disables automatic enemy spawning each turn
+  - Button visible in both tactical and lane views
+  - State persists during combat session
+- [x] Turn-based spawn cycle
+  - **Timing**: Turn start → Movement → Spawning → Card draw → Tactical phase
+  - Spawns at column 15 (rightmost enemy column)
+  - **Per lane**: 2 mooks (guaranteed) + 1 elite (30% chance)
+  - **Total**: 6-9 enemies spawn per turn across all lanes
+  - Spawns find empty rows sequentially (0-4)
+- [x] Enemy movement integration
+  - All enemies move forward at turn start (before spawning)
+  - Extracted from enemy_pathfinding_alpha() logic
+  - Movement distance based on enemy movement_speed stat
+  - Stops when blocked by player ships
+  - Grid positions updated via move_ship_to_cell()
+- [x] Modern spawning logic
+  - Uses correct TextureRect settings (EXPAND_FIT_WIDTH_PROPORTIONAL)
+  - Enemies spawn at proper size from ship_database.csv
+  - Rotated to face left (rotation = PI)
+  - No idle rotation behavior (static facing)
+  - Full data structure with all required fields
+- [x] Enemy wave composition
+  - **Mooks**: Size 30, movement_speed 3, 150 armor, 3 damage
+  - **Elites**: Size 36, movement_speed 2, 500 armor + 100 shield, 10 damage
+  - Elite spawn logged: "Elite spawned in lane X (roll: Y)"
+  - Spawn positions logged with size, armor, shield stats
+- [x] Integration with combat flow
+  - Hook in return_to_tactical_phase() for turn start
+  - Conditional check: only spawns if auto_spawn_enabled
+  - Backward compatibility: old per-lane movement if spawner OFF
+  - No interference with manual enemy deployment
+- [x] Grid and UI integration
+  - Calls occupy_grid_cell() to mark positions
+  - Adds to lanes[lane_index]["units"] array
+  - Creates health bars via health_system
+  - Creates energy bars via health_system
+  - Adds hover detection for tooltips
+  - Proper health/shield/armor tracking
+- [ ] Future Enhancements:
+  - **Wave difficulty scaling**: More enemies/higher elite chance as turns progress
+  - **Boss waves**: Special wave every N turns with boss enemy
+  - **Enemy variety**: Different enemy types per lane, special units (tanks, snipers, healers)
+  - **Enemy formations**: Pre-positioned enemies, strategic placements
+  - **Spawn position variety**: Alternate columns (14, 15), random vs sequential rows
+  - **Victory/defeat conditions**: Check if enemies reach column 0, game over on mothership damage
+  - **Wave counter UI**: Display current turn/wave number
+  - **Spawner abilities**: Give the spawner the ability to cast spells/buffs on enemies
+  - **Enemy AI patterns**: Different targeting/movement behaviors per enemy type
+  - **Elite squad mechanics**: Elites buff nearby mooks
+  - **Environmental spawns**: Hazards, obstacles, or beneficial terrain spawned with enemies
   - Movement cost/action point system
 
 ### 2.24 NOT YET IMPLEMENTED
@@ -672,26 +731,76 @@ The following systems from the original plan are not yet implemented:
 
 ---
 
-## Phase 4: Hangar Scene (Future Deckbuilder)
+## Phase 4: Hangar Scene
 
-### 4.1 Basic Deck Builder ✓ COMPLETED
-- [x] Create `DeckBuilder.tscn` scene
-- [x] Display current deck cards
-  - Scrolling container
-  - Card previews with stats
-  - Card count display
-- [x] Deck statistics
-  - Total card count
-  - Cards by type
-- [x] Return to combat button
-- [ ] Convert to full hangar interface with:
-  - Fleet display area
-  - Pilot roster panel
-  - Resources display
-  - Upgrades/Relics panel
-  - Technology/Blueprints panel
+### 4.1 Hangar Module ✓ COMPLETED
+- [x] Create `Hangar.tscn` scene with dual-panel layout
+  - Ship panel (right 1/3): 12 ships per page in 3×4 grid
+  - Barracks panel (top left): 8 pilots per page in horizontal row
+  - Independent pagination for ships and pilots
+  - Navigation to/from StarMap
+- [x] Ship Display System
+  - 96×96px ship sprite boxes with dark backgrounds
+  - Ship sprites loaded from ship_database.csv
+  - Pilot slot (20×20px yellow) below each ship
+  - 3 upgrade slots (20×20px dark blue) with dynamic visibility
+  - Upgrade slot count based on ship's upgrade_slots column
+  - Dimmed slots for unavailable upgrades (30% opacity)
+- [x] Pilot System Infrastructure
+  - pilot_database.csv with 100 pilots
+  - Columns: call_sign, first_name, last_name, passive_ability, ability_effect, enabled, rarity, portrait_path
+  - starting_pilots.csv for initial pilot roster
+  - 20 pilot portrait assets (128×128px PNGs) in assets/Pilot_portraits/
+  - DataManager extended with pilot loading functions
+- [x] Pilot Barracks Display
+  - PilotCard scene (80×96px) with 64×64px portraits
+  - Call sign displayed below portrait
+  - Grid layout with 8 pilots per page
+  - Page navigation (Next/Prev buttons)
+  - Tooltips showing full name, ability, effect, and rarity
+- [x] Drag-and-Drop Assignment System
+  - Drag pilots from barracks to ship slots
+  - Visual feedback during drag (scale 1.15x, 80% opacity, z-index 100)
+  - Placeholder system prevents grid reflow during drag
+  - Drop detection on ship containers (any part of ship box)
+  - Valid drop: pilot assigned to yellow slot, removed from barracks
+  - Invalid drop: smooth return animation (0.3s cubic ease)
+  - Pilot portraits display on ship yellow slots when assigned
+- [x] Pilot Tooltips on Ships
+  - Hover over assigned pilot portraits shows info
+  - Displays full name, call sign, rarity, ability name and effect
+  - Same tooltip format as barracks pilots
+- [x] Data Integration
+  - DataManager.load_pilot_database() loads all pilots
+  - DataManager.load_starting_pilots() loads initial roster
+  - DataManager.get_pilot_data(call_sign) retrieves pilot info
+  - Hangar tracks assignments (ship_index → call_sign mapping)
+  - Assignment persistence across page changes
 
-**Note**: The current DeckBuilder will be expanded into a full Hangar management interface in future development.
+### 4.2 Legacy Deck Builder
+- [x] `DeckBuilder.tscn` scene (legacy, will be deprecated)
+  - Basic deck viewing with scrolling container
+  - Card previews and count display
+  - Return to combat button
+
+### 4.3 Future Hangar Enhancements
+- [ ] Pilot unassignment (drag from ship back to barracks)
+- [ ] Upgrade/relic system integration
+  - Upgrade slots become functional
+  - Drag-and-drop upgrades from inventory
+  - Visual upgrade icons on slots
+- [ ] Ship repair and construction
+  - Resource costs displayed
+  - Build new ships from blueprints
+  - Repair damaged ships
+- [ ] Pilot management features
+  - Pilot hiring/recruitment
+  - Pilot injury/recovery system
+  - Pilot experience and leveling
+  - Pilot trait effects on combat
+- [ ] Technology/blueprints panel
+- [ ] Resources display integration
+- [ ] Hangar persistence (save/load assignments)
 
 ---
 
@@ -885,75 +994,61 @@ StarMap → ...
 31. **Cinematic Ability System** - Camera zoom, slow-motion projectiles, card popups, and full-speed release after queue
 32. **Incinerator Cannon Card** - Implemented fire beam projectile with 20 damage + 3 burn stacks
 33. **Enemy Pathfinding Alpha** - Enemies move toward player (left/decreasing columns) at start of each lane precombat phase, up to movement_speed cells, stopping if blocked by player ships
+34. **Hangar Module** - Ship display panel (right 1/3, 12 ships per page, 3×4 grid), pilot barracks (top left, 8 pilots per page, horizontal row), independent pagination, navigation from StarMap
+35. **Pilot Database System** - pilot_database.csv with 100 pilots, 20 portrait assets, DataManager pilot loading functions, starting_pilots.csv for initial roster
+36. **Pilot Drag-and-Drop** - Drag pilots from barracks to ship slots, placeholder system prevents grid reflow, visual feedback during drag, smooth return animation for invalid drops
+37. **Pilot Assignment Display** - Pilot portraits show on ship yellow slots when assigned, tooltips with full stats/abilities, 20×20px portraits scale from 64×64px originals
 
-### Immediate Next Steps - PILOT SYSTEM
-The combat mechanics and card system are solid. Next focus is implementing the pilot system:
+### Immediate Next Steps - UPGRADE/RELIC SYSTEM
+The hangar and pilot assignment system is complete. Next focus is implementing the upgrade/relic system:
 
-**Priority 1: Pilot Data & Management**
-1. **Pilot CSV Database**
-   - pilot_database.csv with pilot stats and traits
-   - Columns: pilot_id, display_name, portrait_path, class/specialty
-   - Base stats: accuracy_bonus, evasion_bonus, attack_speed_bonus
-   - Traits: special abilities or passive bonuses
-   - Experience/level progression (optional for MVP)
+**Priority 1: Upgrade Data & Display** ✓ IN PROGRESS
+1. **Upgrade CSV Database**
+   - upgrade_relics.csv with upgrade/relic data ✓ EXISTS
+   - Columns: upgrade_id, display_name, description, rarity, icon_path
+   - Stat modifiers: damage_bonus, shield_bonus, etc.
+   - Special effects and abilities
+   - starting_upgrade_relics.csv for initial inventory ✓ EXISTS
 
-2. **Pilot Roster System**
-   - PilotManager singleton for pilot tracking
-   - Available pilots pool
-   - Assigned pilots (linked to ships)
-   - Injured/unavailable pilots
-   - Pilot hiring/recruitment mechanics
+2. **Upgrade Inventory System**
+   - UpgradeManager singleton (or extend DataManager)
+   - Available upgrades pool
+   - Assigned upgrades (linked to ships)
+   - Upgrade categories (weapons, shields, engines, etc.)
 
-3. **Pilot-Ship Assignment**
-   - UI for assigning pilots to ships
-   - Visual indicator showing assigned pilot (portrait/icon)
-   - Stat bonuses applied when pilot assigned
+3. **Upgrade Slot System**
+   - Visual upgrade icons on ship upgrade slots
+   - Drag-and-drop from inventory to ship slots
+   - Slot restrictions (1-3 slots per ship from database)
    - Unassign/reassign mechanics
-   - Ship performance without pilot (baseline stats)
+   - Upgrade tooltips on hover
 
-**Priority 2: Pilot Integration with Combat**
-1. **Stat Bonuses**
-   - Apply pilot accuracy bonus to ship accuracy
-   - Apply pilot evasion bonus to ship evasion
-   - Apply pilot attack speed bonus to ship attack speed
+**Priority 2: Upgrade Combat Integration**
+1. **Stat Bonuses from Upgrades**
+   - Apply upgrade damage/shield/speed bonuses to ships
+   - Stack multiple upgrades on same ship
    - Display modified stats in ship inspector tooltip
+   - Upgrade effects persist in combat
 
-2. **Pilot Traits/Abilities**
-   - Passive traits (e.g., +10% shield regeneration)
-   - Active abilities (cooldown-based)
-   - Trait effects trigger during combat
-   - Visual feedback for trait activation
+2. **Special Upgrade Effects**
+   - Passive effects (e.g., shield regeneration)
+   - Triggered effects (on hit, on kill, etc.)
+   - Effect animations and visual feedback
+   - Unique upgrade abilities
 
-3. **Pilot Experience & Injury**
-   - Pilots gain XP from combat participation
-   - Ships destroyed = pilot injured (unavailable for X turns)
-   - Pilot level-up system (optional for MVP)
-   - Medical bay/recovery mechanics
-
-**Priority 3: Pilot UI**
-1. **Pilot Selection Interface**
-   - Pilot roster panel (in hangar or pre-combat)
-   - Pilot portraits and stat displays
-   - Assignment drag-and-drop or click-to-assign
-   - Current assignments visible
-
-2. **Combat Pilot Display**
-   - Small pilot portrait on ship containers
-   - Tooltip shows pilot name and bonuses
-   - Pilot status indicators (healthy/injured)
-
-3. **Pilot Management Screen**
-   - Full roster view with filtering
-   - Pilot details and history
-   - Recruitment/dismissal options
-   - Medical bay status
+**Priority 3: Future Pilot Combat Integration**
+1. **Pilot Stat Bonuses** (not yet implemented)
+   - Apply pilot bonuses to assigned ships in combat
+   - Accuracy, evasion, attack speed modifiers
+   - Pilot abilities and traits
+   - Pilot injury/experience system
 
 ### Medium-Term Goals
-1. **Pilot System** (next priority) - Assignment, traits, injury, XP
-2. **Enemy Waves** - Spawn timing, wave composition, preview system
-3. **Victory/Defeat Conditions** - Combat end triggers, rewards screen
-4. **Expand Starmap** - Node types (combat/event/shop/rest/boss), path validation
-5. **Convert DeckBuilder to Hangar** - Fleet management, pilot roster, upgrades panel
+1. **Upgrade/Relic System** (next priority) - Inventory, drag-drop to slots, stat bonuses, special effects
+2. **Pilot Combat Integration** - Apply pilot bonuses in combat, abilities, injury/XP
+3. **Enemy Waves** - Spawn timing, wave composition, preview system
+4. **Victory/Defeat Conditions** - Combat end triggers, rewards screen
+5. **Expand Starmap** - Node types (combat/event/shop/rest/boss), path validation
 6. **More Card Types** - Complete elemental ammo set, combo cards, ship deployment cards
 
 ### Long-Term Goals
