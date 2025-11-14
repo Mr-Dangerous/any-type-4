@@ -357,10 +357,10 @@ theme_override_font_sizes/font_size = 16
 text = "Deck Builder"
 
 [node name="HangarButton" type="Button" parent="UI"]
-offset_left = 980.0
-offset_top = 170.0
-offset_right = 1130.0
-offset_bottom = 210.0
+offset_left = 20.0
+offset_top = 20.0
+offset_right = 170.0
+offset_bottom = 60.0
 theme_override_font_sizes/font_size = 16
 text = "Hangar"
 
