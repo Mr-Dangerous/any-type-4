@@ -13,13 +13,16 @@ static func execute_card_effect_cinematic(function_name: String, source, target,
 	# For now, just call the effect version which handles projectiles
 	# We'll modify the effect functions to accept a cinematic flag
 	match function_name:
-		"execute_Incinerator_Cannon_Effect":
-			return await execute_Incinerator_Cannon_Effect_Cinematic(source, target, combat_scene)
-		"execute_Missile_Lock_Effect":
-			return await execute_Missile_Lock_Effect_Cinematic(source, target, combat_scene)
-		"execute_Shield_Battery_Effect":
+		"execute_Incinerator_Cannon_effect":
+			return await execute_Incinerator_Cannon_effect_cinematic(source, target, combat_scene)
+		"execute_Missile_Lock_effect":
+			return await execute_Missile_Lock_effect_cinematic(source, target, combat_scene)
+		"execute_Alpha_Strike_effect":
+			# Alpha Strike doesn't need cinematic treatment - just execute normally
+			return await execute_Alpha_Strike_effect(target, combat_scene)
+		"execute_Shield_Battery_effect":
 			# Shield Battery doesn't need cinematic treatment - just execute normally
-			return await execute_Shield_Battery_Effect(target, combat_scene)
+			return await execute_Shield_Battery_effect(target, combat_scene)
 		_:
 			print("CardEffects: No cinematic version for: " + function_name)
 			return false
@@ -39,22 +42,32 @@ static func execute_card_effect(function_name: String, target, combat_scene: Nod
 			return execute_Energy_Beta(target, combat_scene)
 		"execute_Turret_Blast":
 			return execute_Turret_Blast(target, combat_scene)
+		"execute_missile_lock":
+			return execute_missile_lock(target, combat_scene)
 		"execute_Missile_Lock":
 			return execute_Missile_Lock(target, combat_scene)
-		"execute_Missile_Lock_Effect":
-			return await execute_Missile_Lock_Effect(target, combat_scene)
+		"execute_Missile_Lock_effect":
+			return await execute_Missile_Lock_effect(target, combat_scene)
 		"execute_Incendiary_Rounds":
 			return execute_Incendiary_Rounds(target, combat_scene)
 		"execute_Cryo_Rounds":
 			return execute_Cryo_Rounds(target, combat_scene)
 		"execute_Incinerator_Cannon":
 			return execute_Incinerator_Cannon(target, combat_scene)
-		"execute_Incinerator_Cannon_Effect":
-			return await execute_Incinerator_Cannon_Effect(target, combat_scene)
+		"execute_Incinerator_Cannon_effect":
+			return await execute_Incinerator_Cannon_effect(target, combat_scene)
+		"execute_alpha_strike":
+			return execute_alpha_strike(target, combat_scene)
+		"execute_Alpha_Strike":
+			return execute_Alpha_Strike(target, combat_scene)
+		"execute_Alpha_Strike_effect":
+			return await execute_Alpha_Strike_effect(target, combat_scene)
+		"execute_shield_battery":
+			return execute_shield_battery(target, combat_scene)
 		"execute_Shield_Battery":
 			return execute_Shield_Battery(target, combat_scene)
-		"execute_Shield_Battery_Effect":
-			return await execute_Shield_Battery_Effect(target, combat_scene)
+		"execute_Shield_Battery_effect":
+			return await execute_Shield_Battery_effect(target, combat_scene)
 		_:
 			print("CardEffects: Unknown function (not yet implemented): " + function_name)
 			return false
@@ -190,24 +203,24 @@ static func execute_Energy_Beta(target, combat_scene: Node) -> bool:
 	# Show notification for primary target
 	show_effect_notification(target, "+75 ENERGY", Color.YELLOW)
 
-	# Apply AoE effect with range 1, friendly targets only
-	var affected_ships = apply_aoe_effect(target, energy_to_add, 1, "friendly", "energy", combat_scene)
+	# Apply AoE effect with range 1
+	var affected_ships = apply_aoe_effect(target, energy_to_add, 1, "energy", combat_scene)
 
 	print("CardEffects: Energy Beta - Affected ", affected_ships.size(), " additional ships with AoE")
 
 	return true
 
-static func apply_aoe_effect(primary_target: Dictionary, base_value: int, aoe_range: int, target_faction: String, effect_type: String, combat_scene: Node) -> Array:
+static func apply_aoe_effect(primary_target: Dictionary, base_value: int, aoe_range: int, effect_type: String, combat_scene: Node) -> Array:
 	"""
 	Apply AoE effect to ships near primary target.
 	Effect reduces by 50% per Manhattan distance unit (rounded down).
 	Returns array of affected ships (excluding primary target).
+	Affects ALL ships within range regardless of faction.
 
 	Parameters:
 	- primary_target: The ship directly targeted by the card
 	- base_value: The base effect value (will be halved per distance)
 	- aoe_range: Maximum Manhattan distance to affect
-	- target_faction: "friendly" or "enemy" - filters which ships to affect
 	- effect_type: Type of effect ("energy", "shield", "damage", etc.)
 	- combat_scene: Reference to combat scene for accessing ships
 	"""
@@ -229,25 +242,12 @@ static func apply_aoe_effect(primary_target: Dictionary, base_value: int, aoe_ra
 		print("CardEffects: AoE - Combat scene doesn't have get_all_ships method")
 		return affected_ships
 
-	# Determine if we're targeting friendlies or enemies
-	var primary_is_enemy = primary_target.get("is_enemy", false)
-	var target_is_enemy = (target_faction == "enemy")
-
-	# For friendly faction, target ships with same is_enemy value as primary
-	# For enemy faction, target ships with opposite is_enemy value
-	var looking_for_enemy = primary_is_enemy if (target_faction == "friendly") else (not primary_is_enemy)
-
-	print("CardEffects: AoE - Primary at (", primary_row, ",", primary_col, ") | Range: ", aoe_range, " | Target faction: ", target_faction)
+	print("CardEffects: AoE - Primary at (", primary_row, ",", primary_col, ") | Range: ", aoe_range)
 
 	# Find and affect ships within range
 	for ship in all_ships:
 		# Skip the primary target
 		if ship == primary_target:
-			continue
-
-		# Check faction
-		var ship_is_enemy = ship.get("is_enemy", false)
-		if ship_is_enemy != looking_for_enemy:
 			continue
 
 		# Get ship position
@@ -333,9 +333,17 @@ static func apply_shield_effect(ship: Dictionary, shield_amount: int, combat_sce
 
 static func apply_damage_effect(ship: Dictionary, damage_amount: int, combat_scene: Node):
 	"""Apply damage to a ship (used by AoE system)"""
+	print("CardEffects: apply_damage_effect called - Ship: ", ship.get("type", "unknown"), " | Damage: ", damage_amount)
 	var damage_info = apply_missile_damage(ship, damage_amount)
+	print("  Damage applied: ", damage_info.get("total_damage", 0))
 	show_effect_notification(ship, "-%d" % damage_info.get("total_damage", 0), Color.RED)
 	update_ship_ui(ship, combat_scene)
+
+	# Check if ship was destroyed
+	if damage_info.get("destroyed", false):
+		print("  Ship destroyed by AoE damage")
+		if combat_scene.has_method("destroy_ship"):
+			combat_scene.destroy_ship(ship)
 
 static func execute_Turret_Blast(target, combat_scene: Node) -> bool:
 	"""Activate a turret ability"""
@@ -359,6 +367,10 @@ static func execute_Turret_Blast(target, combat_scene: Node) -> bool:
 	show_effect_notification(target, "TURRET ACTIVATED", Color.RED)
 
 	return true
+
+static func execute_missile_lock(target, combat_scene: Node) -> bool:
+	"""Lowercase wrapper for ship database - calls the proper case version"""
+	return execute_Missile_Lock(target, combat_scene)
 
 static func execute_Missile_Lock(target, combat_scene: Node) -> bool:
 	"""Queue Missile Lock ability for a friendly ship"""
@@ -385,12 +397,27 @@ static func execute_Missile_Lock(target, combat_scene: Node) -> bool:
 	var ship_name = target.get("type", "Unknown")
 	print("CardEffects: Missile Lock - Queuing Missile Lock for ", ship_name)
 
+	# Get card data for combo fields
+	var card_data = DataManager.get_card_data("Missile Lock")
+
+	print("CardEffects: Missile Lock - Card data retrieved:")
+	print("  card_data exists: ", card_data != null)
+	if card_data:
+		print("  card_data.combo_trigger_flag: ", card_data.get("combo_trigger_flag", "NOT FOUND"))
+		print("  card_data.trigger_type: '", card_data.get("trigger_type", "NOT FOUND"), "'")
+
 	# Create ability data
 	var ability_data = {
 		"ability_name": "Missile Lock",
-		"ability_function": "execute_Missile_Lock_Effect",  # Actual execution function
-		"source": "card"  # This was from a card, not ship energy
+		"ability_function": "execute_Missile_Lock_effect",  # Actual execution function
+		"source": "card",  # This was from a card, not ship energy
+		"combo_trigger": card_data.get("combo_trigger_flag", false),  # Can trigger combos
+		"trigger_type": card_data.get("trigger_type", "")  # Explosive trigger
 	}
+
+	print("CardEffects: Missile Lock ability_data created:")
+	print("  combo_trigger: ", ability_data["combo_trigger"])
+	print("  trigger_type: '", ability_data["trigger_type"], "'")
 
 	# Queue the ability on the target ship
 	if combat_scene and combat_scene.has_method("queue_ability_for_ship"):
@@ -401,7 +428,7 @@ static func execute_Missile_Lock(target, combat_scene: Node) -> bool:
 
 	return true
 
-static func execute_Missile_Lock_Effect(target: Dictionary, combat_scene: Node) -> bool:
+static func execute_Missile_Lock_effect(target: Dictionary, combat_scene: Node) -> bool:
 	"""Fire a missile projectile with fixed 50 damage and 0.4s flight time. AoE(1): 25 damage to adjacent enemies"""
 	if not target.has("sprite") or not is_instance_valid(target.get("sprite")):
 		print("CardEffects: Missile Lock Effect - Invalid target sprite")
@@ -481,10 +508,10 @@ static func execute_Missile_Lock_Effect(target: Dictionary, combat_scene: Node) 
 
 	print("CardEffects: Missile Lock - Hit ", target.get("type", "target"), " for ", missile_damage, " damage")
 
-	# Apply AoE damage (range 1, half damage to adjacent enemies)
-	var affected_ships = apply_aoe_effect(target, missile_damage, 1, "enemy", "damage", combat_scene)
+	# Apply AoE damage (range 1, half damage to adjacent ships)
+	var affected_ships = apply_aoe_effect(target, missile_damage, 1, "damage", combat_scene)
 
-	print("CardEffects: Missile Lock AoE - Affected ", affected_ships.size(), " additional enemy ships")
+	print("CardEffects: Missile Lock AoE - Affected ", affected_ships.size(), " additional ships")
 
 	return true
 
@@ -679,12 +706,27 @@ static func execute_Incinerator_Cannon(target, combat_scene: Node) -> bool:
 	var ship_name = target.get("type", "Unknown")
 	print("CardEffects: Incinerator Cannon - Queuing for ", ship_name)
 
+	# Get card data for combo fields
+	var card_data = DataManager.get_card_data("Incinerator Cannon")
+
+	print("CardEffects: Incinerator Cannon - Card data retrieved:")
+	print("  card_data exists: ", card_data != null)
+	if card_data:
+		print("  card_data.combo_trigger_flag: ", card_data.get("combo_trigger_flag", "NOT FOUND"))
+		print("  card_data.trigger_type: '", card_data.get("trigger_type", "NOT FOUND"), "'")
+
 	# Create ability data
 	var ability_data = {
 		"ability_name": "Incinerator Cannon",
-		"ability_function": "execute_Incinerator_Cannon_Effect",
-		"source": "card"
+		"ability_function": "execute_Incinerator_Cannon_effect",
+		"source": "card",
+		"combo_trigger": card_data.get("combo_trigger_flag", false),  # Can trigger combos
+		"trigger_type": card_data.get("trigger_type", "")  # Fire trigger
 	}
+
+	print("CardEffects: Incinerator Cannon ability_data created:")
+	print("  combo_trigger: ", ability_data["combo_trigger"])
+	print("  trigger_type: '", ability_data["trigger_type"], "'")
 
 	# Queue the ability
 	if combat_scene and combat_scene.has_method("queue_ability_for_ship"):
@@ -695,7 +737,7 @@ static func execute_Incinerator_Cannon(target, combat_scene: Node) -> bool:
 
 	return true
 
-static func execute_Incinerator_Cannon_Effect(target: Dictionary, combat_scene: Node) -> bool:
+static func execute_Incinerator_Cannon_effect(target: Dictionary, combat_scene: Node) -> bool:
 	"""Fire an incinerator beam projectile with 20 fire damage and 3 burn stacks"""
 	if not target.has("sprite") or not is_instance_valid(target.get("sprite")):
 		print("CardEffects: Incinerator Cannon Effect - Invalid target sprite")
@@ -796,6 +838,78 @@ static func execute_Incinerator_Cannon_Effect(target: Dictionary, combat_scene: 
 
 	return true
 
+static func execute_alpha_strike(target, combat_scene: Node) -> bool:
+	"""Lowercase wrapper for ship database - calls the proper case version"""
+	return execute_Alpha_Strike(target, combat_scene)
+
+static func execute_Alpha_Strike(target, combat_scene: Node) -> bool:
+	"""Queue Alpha Strike ability for a friendly ship"""
+	if not target is Dictionary or not target.has("container"):
+		print("CardEffects: Alpha Strike - Invalid target")
+		return false
+
+	# Validate target is a friendly ship
+	var is_enemy = target.get("is_enemy", true)
+	if is_enemy:
+		print("CardEffects: Alpha Strike - Target must be friendly")
+		return false
+
+	# Validate target type (must be a ship with ability_stack)
+	var object_type = target.get("object_type", "")
+	if object_type != "ship":
+		print("CardEffects: Alpha Strike - Target must be a ship, got: ", object_type)
+		return false
+
+	if not target.has("ability_stack"):
+		print("CardEffects: Alpha Strike - Target ship has no ability_stack")
+		return false
+
+	var ship_name = target.get("type", "Unknown")
+	print("CardEffects: Alpha Strike - Queuing Alpha Strike for ", ship_name)
+
+	# Create ability data
+	var ability_data = {
+		"ability_name": "Alpha Strike",
+		"ability_function": "execute_Alpha_Strike_effect",
+		"source": "card"
+	}
+
+	# Queue the ability on the target ship
+	if combat_scene and combat_scene.has_method("queue_ability_for_ship"):
+		combat_scene.queue_ability_for_ship(target, ability_data)
+
+	# Show notification
+	show_effect_notification(target, "ALPHA STRIKE QUEUED", Color.ORANGE)
+
+	return true
+
+static func execute_Alpha_Strike_effect(target: Dictionary, combat_scene: Node) -> bool:
+	"""Increase target ship's attack speed by 50% for the rest of combat"""
+	if not target.has("sprite") or not is_instance_valid(target.get("sprite")):
+		print("CardEffects: Alpha Strike Effect - Invalid target")
+		return false
+
+	var ship_name = target.get("type", "Unknown")
+	var current_attack_speed = target.get("attack_speed", 1.0)
+	var new_attack_speed = current_attack_speed * 1.5
+
+	# Apply the buff
+	target["attack_speed"] = new_attack_speed
+
+	print("CardEffects: Alpha Strike - Increased attack speed of ", ship_name, " from ", current_attack_speed, " to ", new_attack_speed)
+
+	# Show notification
+	show_effect_notification(target, "+50% ATTACK SPEED", Color.ORANGE)
+
+	# Visual effect - aura or flash
+	display_aura_effect(target, combat_scene)
+
+	return true
+
+static func execute_shield_battery(target, combat_scene: Node) -> bool:
+	"""Lowercase wrapper for ship database - calls the proper case version"""
+	return execute_Shield_Battery(target, combat_scene)
+
 static func execute_Shield_Battery(target, combat_scene: Node) -> bool:
 	"""Queue Shield Battery ability for a friendly ship"""
 	if not target is Dictionary or not target.has("container"):
@@ -818,7 +932,7 @@ static func execute_Shield_Battery(target, combat_scene: Node) -> bool:
 	# Create ability data
 	var ability_data = {
 		"ability_name": "Shield Battery",
-		"ability_function": "execute_Shield_Battery_Effect",
+		"ability_function": "execute_Shield_Battery_effect",
 		"source": "card"
 	}
 	
@@ -831,16 +945,16 @@ static func execute_Shield_Battery(target, combat_scene: Node) -> bool:
 	
 	return true
 
-static func apply_aoe_full_effect(primary_target: Dictionary, base_value: int, aoe_range: int, target_faction: String, effect_type: String, combat_scene: Node) -> Array:
+static func apply_aoe_full_effect(primary_target: Dictionary, base_value: int, aoe_range: int, effect_type: String, combat_scene: Node) -> Array:
 	"""
 	Apply AoE effect with FULL value (no reduction) to all ships within range.
 	Unlike apply_aoe_effect, this does not reduce effect by distance.
-	
+	Affects ALL ships within range regardless of faction.
+
 	Parameters:
 	- primary_target: The ship directly targeted by the card
 	- base_value: The effect value to apply (same for all ships in range)
 	- aoe_range: Maximum Manhattan distance to affect
-	- target_faction: "friendly" or "enemy" - filters which ships to affect
 	- effect_type: Type of effect ("energy", "shield", "damage", etc.)
 	- combat_scene: Reference to combat scene for accessing ships
 	"""
@@ -861,21 +975,13 @@ static func apply_aoe_full_effect(primary_target: Dictionary, base_value: int, a
 	else:
 		print("CardEffects: AoE Full - Combat scene doesn't have get_all_ships method")
 		return affected_ships
-	
-	# Determine target faction
-	var primary_is_enemy = primary_target.get("is_enemy", false)
-	var looking_for_enemy = primary_is_enemy if (target_faction == "friendly") else (not primary_is_enemy)
-	
-	print("CardEffects: AoE Full - Primary at (", primary_row, ",", primary_col, ") | Range: ", aoe_range, " | Target faction: ", target_faction)
-	
+
+	print("CardEffects: AoE Full - Primary at (", primary_row, ",", primary_col, ") | Range: ", aoe_range)
+
 	# Find and affect ships within range
 	for ship in all_ships:
 		# Skip the primary target (it's already been affected)
 		if ship == primary_target:
-			continue
-		
-		# Check faction
-		if ship.get("is_enemy", false) != looking_for_enemy:
 			continue
 		
 		# Get ship position
@@ -948,7 +1054,7 @@ static func display_aura_effect(target: Dictionary, combat_scene: Node):
 	await tween.finished
 	aura.queue_free()
 
-static func execute_Shield_Battery_Effect(target: Dictionary, combat_scene: Node) -> bool:
+static func execute_Shield_Battery_effect(target: Dictionary, combat_scene: Node) -> bool:
 	"""Restore 50 shields with AoE(2)Full effect (full effect on all ships within range 2)"""
 	if not target.has("sprite") or not is_instance_valid(target.get("sprite")):
 		print("CardEffects: Shield Battery Effect - Invalid target")
@@ -960,10 +1066,10 @@ static func execute_Shield_Battery_Effect(target: Dictionary, combat_scene: Node
 	
 	# Apply shield to primary target
 	apply_shield_effect(target, shield_amount, combat_scene)
-	
-	# Apply AoE(2)Full - get all friendly ships within range 2 with FULL effect
-	var affected_ships = apply_aoe_full_effect(target, shield_amount, 2, "friendly", "shield", combat_scene)
-	
+
+	# Apply AoE(2)Full - get all ships within range 2 with FULL effect
+	var affected_ships = apply_aoe_full_effect(target, shield_amount, 2, "shield", combat_scene)
+
 	print("CardEffects: Shield Battery - Affected ", affected_ships.size(), " additional ships")
 	
 	# Display aura effect
@@ -971,7 +1077,7 @@ static func execute_Shield_Battery_Effect(target: Dictionary, combat_scene: Node
 	
 	return true
 
-static func execute_Incinerator_Cannon_Effect_Cinematic(source: Dictionary, target: Dictionary, combat_scene: Node) -> bool:
+static func execute_Incinerator_Cannon_effect_cinematic(source: Dictionary, target: Dictionary, combat_scene: Node) -> bool:
 	"""Fire incinerator beam in slow-motion cinematic mode"""
 	if not source.has("sprite") or not is_instance_valid(source.get("sprite")):
 		print("CardEffects: Incinerator Cannon Cinematic - Invalid source sprite")
@@ -1035,8 +1141,13 @@ static func execute_Incinerator_Cannon_Effect_Cinematic(source: Dictionary, targ
 
 	return true
 
-static func execute_Missile_Lock_Effect_Cinematic(source: Dictionary, target: Dictionary, combat_scene: Node) -> bool:
+static func execute_Missile_Lock_effect_cinematic(source: Dictionary, target: Dictionary, combat_scene: Node) -> bool:
 	"""Fire missile in slow-motion cinematic mode"""
+	print("CardEffects: execute_Missile_Lock_effect_cinematic called!")
+	print("  Source ship: ", source.get("type", "unknown"))
+	print("  Source combo_trigger: ", source.get("combo_trigger", "NOT SET"))
+	print("  Source trigger_type: ", source.get("trigger_type", "NOT SET"))
+
 	# Similar to Incinerator Cannon but with missile properties
 	var card_data = DataManager.get_card_data("Missile Lock")
 	var missile_sprite_path = card_data.get("projectile_sprite_path", "res://assets/Effects/s_fxProjectile_2_drone/s_fxProjectile_2_drone.png")
@@ -1086,3 +1197,143 @@ static func execute_Missile_Lock_Effect_Cinematic(source: Dictionary, target: Di
 	combat_scene.stored_projectiles.append(projectile_data)
 
 	return true
+
+# ============================================================================
+# ELEMENTAL COMBO FUNCTIONS
+# ============================================================================
+
+static func execute_Shrapnel_Blast(target: Dictionary, combat_scene: Node) -> bool:
+	"""
+	Shrapnel Blast Elemental Combo
+	Trigger: Explosive trigger + Burn status
+	Effect: 20 fire damage per burn stack to target and AoE(1), consumes all burn stacks
+	"""
+	print("CardEffects: Executing Shrapnel Blast combo!")
+
+	# Get burn stacks on target
+	var burn_stacks = combat_scene.status_effect_manager.get_status_stacks(target, "burn")
+
+	if burn_stacks <= 0:
+		print("CardEffects: Shrapnel Blast - No burn stacks found, combo shouldn't have triggered!")
+		return false
+
+	# Calculate damage: 20 fire damage per burn stack
+	var damage_per_stack = 20
+	var total_damage = damage_per_stack * burn_stacks
+
+	print("CardEffects: Shrapnel Blast - ", burn_stacks, " burn stacks = ", total_damage, " fire damage to target + AoE(1)")
+
+	# Check target's HP before damage
+	print("CardEffects: Shrapnel Blast - Target HP BEFORE damage:")
+	print("  current_armor: ", target.get("current_armor", "N/A"))
+	print("  current_shield: ", target.get("current_shield", "N/A"))
+	print("  current_overshield: ", target.get("current_overshield", "N/A"))
+
+	# Apply damage to primary target
+	print("CardEffects: Shrapnel Blast - Applying ", total_damage, " damage to primary target")
+	var damage_result = combat_scene.health_system.apply_damage(target, total_damage)
+	print("CardEffects: Shrapnel Blast - Damage result:", damage_result)
+
+	# Check target's HP after damage
+	print("CardEffects: Shrapnel Blast - Target HP AFTER damage:")
+	print("  current_armor: ", target.get("current_armor", "N/A"))
+	print("  current_shield: ", target.get("current_shield", "N/A"))
+	print("  current_overshield: ", target.get("current_overshield", "N/A"))
+
+	show_missile_damage_number(target, total_damage, {"is_crit": false, "is_miss": false}, combat_scene)
+
+	# Apply AoE(1) damage to surrounding ships
+	print("CardEffects: Shrapnel Blast - Applying AoE damage within range 1")
+	print("  Target position: row=", target.get("grid_row", -1), " col=", target.get("grid_col", -1))
+	var affected_ships = apply_aoe_effect(target, total_damage, 1, "damage", combat_scene)
+	print("CardEffects: Shrapnel Blast - AoE affected ", affected_ships.size(), " additional ships")
+
+	# Remove ALL burn stacks from target (combo consumes the setup)
+	combat_scene.status_effect_manager.clear_status_type(target, "burn")
+
+	# Show large combo notification
+	show_combo_notification(target, "SHRAPNEL BLAST!", Color.ORANGE_RED, combat_scene)
+
+	# Trigger screen shake for impact
+	combat_scene.trigger_screen_shake(12.0, 0.4)
+
+	return true
+
+static func show_combo_notification(target: Dictionary, text: String, color: Color, combat_scene: Node):
+	"""
+	Show large, flashy notification for combo triggers
+
+	Args:
+		target: The ship that triggered the combo
+		text: Combo name to display
+		color: Text color
+		combat_scene: Reference to combat scene for creating tweens
+	"""
+	var container = target.get("container")
+	if not container or not is_instance_valid(container):
+		print("CardEffects: show_combo_notification - Target container is invalid, using combat_scene instead")
+		# Target is dead/destroyed, add label to combat scene directly
+		var label = Label.new()
+		label.text = text
+		label.add_theme_font_size_override("font_size", 28)
+		label.add_theme_color_override("font_color", color)
+		label.add_theme_color_override("font_outline_color", Color.BLACK)
+		label.add_theme_constant_override("outline_size", 3)
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		label.z_index = 2000
+
+		# Use target's last known position if sprite still exists
+		if target.has("sprite") and is_instance_valid(target.get("sprite")):
+			label.position = target["sprite"].global_position + Vector2(-100, -100)
+		else:
+			# Use center of screen as fallback
+			label.position = combat_scene.get_viewport_rect().size / 2
+
+		combat_scene.add_child(label)
+
+		# Simplified animation for dead targets
+		label.modulate = Color(color.r, color.g, color.b, 0)
+		var tween = combat_scene.create_tween()
+		tween.tween_property(label, "modulate:a", 1.0, 0.3)
+		tween.tween_property(label, "position:y", label.position.y - 60, 1.0)
+		tween.tween_property(label, "modulate:a", 0.0, 0.5)
+		tween.tween_callback(func(): if is_instance_valid(label): label.queue_free())
+		return
+
+	var label = Label.new()
+	label.text = text
+	label.add_theme_font_size_override("font_size", 28)  # Larger than normal notifications
+	label.add_theme_color_override("font_color", color)
+	label.add_theme_color_override("font_outline_color", Color.BLACK)
+	label.add_theme_constant_override("outline_size", 3)
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.z_index = 2000  # Very high z-index to be on top
+
+	# Position above ship
+	var ship_size = target.get("size", 64)
+	label.position = Vector2(-100, -ship_size - 50)  # Higher and wider for larger text
+
+	container.add_child(label)
+
+	# Start invisible and small
+	label.modulate = Color(color.r, color.g, color.b, 0)
+	label.scale = Vector2(0.5, 0.5)
+
+	# Animate: scale up, fade in, float up, fade out
+	var tween = combat_scene.create_tween()
+	tween.set_parallel(true)
+
+	# Fade in and scale up quickly
+	tween.tween_property(label, "modulate:a", 1.0, 0.2)
+	tween.tween_property(label, "scale", Vector2(1.5, 1.5), 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+	# Sequential: float up and fade out
+	tween.set_parallel(false)
+	tween.tween_property(label, "position:y", label.position.y - 40, 0.6)
+
+	tween.set_parallel(true)
+	tween.tween_property(label, "modulate:a", 0.0, 0.4)
+
+	await tween.finished
+	if is_instance_valid(label):
+		label.queue_free()
