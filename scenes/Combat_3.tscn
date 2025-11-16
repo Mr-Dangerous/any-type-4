@@ -1,0 +1,23 @@
+[gd_scene load_steps=3 format=3 uid="uid://cbw8r6vu1abjk"]
+
+[ext_resource type="Script" path="res://scripts/Combat_3.gd" id="1_combat3"]
+[ext_resource type="PackedScene" uid="uid://b2qc8h3v7n4xm" path="res://scenes/BackgroundManager.tscn" id="2_background"]
+
+[node name="Combat_3" type="Node2D"]
+script = ExtResource("1_combat3")
+
+[node name="BackgroundManager" parent="." instance=ExtResource("2_background")]
+z_index = -100
+
+[node name="Camera" type="Camera2D" parent="."]
+position = Vector2(576, 324)
+zoom = Vector2(1, 1)
+
+[node name="UnitContainer" type="Node2D" parent="."]
+z_index = 10
+
+[node name="UILayer" type="CanvasLayer" parent="."]
+layer = 500
+
+[node name="NotificationLayer" type="CanvasLayer" parent="."]
+layer = 1000

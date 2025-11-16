@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="any_type_4"
-run/main_scene="res://scenes/Combat_2.tscn"
+run/main_scene="res://scenes/Hangar.tscn"
 config/features=PackedStringArray("4.5", "GL Compatibility")
 config/icon="res://icon.svg"
 
@@ -22,6 +22,14 @@ DataManager="*res://scripts/DataManager.gd"
 GameData="*res://scripts/GameData.gd"
 CombatConstants="*res://scripts/CombatConstants.gd"
 CardHandManager="*res://scripts/CardHandManager.gd"
+TooltipManager="*res://scripts/TooltipManager.gd"
+CombatGridManager="*res://scripts/CombatGridManager.gd"
+CombatWaveManager="*res://scripts/CombatWaveManager.gd"
+GDAIMCPRuntime="*res://addons/gdai-mcp-plugin-godot/gdai_mcp_runtime.gd"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/gdai-mcp-plugin-godot/plugin.cfg")
 
 [rendering]
 
