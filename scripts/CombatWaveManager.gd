@@ -100,14 +100,15 @@ func load_scenarios() -> bool:
 			"scenario_name": scenario_name,
 			"number_of_waves": int(row[1]) if row.size() > 1 else 0,
 			"scenario_width": int(row[2]) if row.size() > 2 else 25,  # Default to full grid width
-			"wave_width": int(row[3]) if row.size() > 3 else 20,  # Default to full grid height
-			"boss_loop": row[4].to_lower() == "true" if row.size() > 4 else false,
-			"boss_wave": row[5] if row.size() > 5 else "",
+			"damage_sponge_armor": int(row[3]) if row.size() > 3 else 100,  # Default to 100 armor
+			"wave_width": int(row[4]) if row.size() > 4 else 20,  # Default to full grid height
+			"boss_loop": row[5].to_lower() == "true" if row.size() > 5 else false,
+			"boss_wave": row[6] if row.size() > 6 else "",
 			"waves": []  # List of wave names
 		}
 
-		# Collect wave names from wave_1 to wave_8 (columns 6-13)
-		for i in range(6, min(row.size(), 14)):
+		# Collect wave names from wave_1 to wave_8 (columns 7-14)
+		for i in range(7, min(row.size(), 15)):
 			var wave_name = row[i].strip_edges()
 			if wave_name != "":
 				scenario_data["waves"].append(wave_name)
@@ -206,3 +207,12 @@ func get_scenario_width() -> int:
 
 	var scenario = scenarios[current_scenario_name]
 	return scenario.get("scenario_width", 25)
+
+func get_damage_sponge_armor() -> int:
+	"""Get the damage sponge armor value for the current scenario"""
+	if current_scenario_name == "":
+		push_warning("CombatWaveManager: No scenario loaded")
+		return 100  # Default to 100 armor
+
+	var scenario = scenarios[current_scenario_name]
+	return scenario.get("damage_sponge_armor", 100)

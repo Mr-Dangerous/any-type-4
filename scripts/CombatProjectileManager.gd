@@ -133,6 +133,10 @@ func _on_launch_projectile_hit(laser: Sprite2D, attacker: Dictionary, target: Di
 	# Apply freeze status effect if attacker has ice damage
 	apply_freeze_on_hit(attacker, target, damage_result)
 
+	# Check for elemental combos (only on successful hits, not misses)
+	if not damage_result.get("is_miss", false):
+		check_and_trigger_combos(attacker, target)
+
 # ============================================================================
 # DEPRECATED FUNCTIONS (kept for reference, use launch_projectile instead)
 # ============================================================================
@@ -234,7 +238,7 @@ func on_projectile_hit(projectile: Sprite2D, attacker: Dictionary, target: Dicti
 	damage_dealt.emit(attacker, target, damage_info)
 
 	# Apply burn status effect if attacker has fire damage
-	print("CombatProjectileManager: About to check for burn application...")
+	# print("CombatProjectileManager: About to check for burn application...")
 	apply_burn_on_hit(attacker, target, damage_result)
 
 	# Apply freeze status effect if attacker has ice damage
@@ -258,11 +262,11 @@ func calculate_damage(attacker: Dictionary, target: Dictionary) -> Dictionary:
 
 	NOTE: Old implementation was missing reinforced armor damage reduction!
 	"""
-	var base_damage = attacker["stats"].get("damage", 0)
-	var accuracy = attacker["stats"].get("accuracy", 100)
-	var evasion = target["stats"].get("evasion", 0)
+	var base_damage = attacker.get("damage", 0)
+	var accuracy = attacker.get("accuracy", 100)
+	var evasion = target.get("evasion", 0)
 
-	print("CombatProjectileManager.calculate_damage: base_damage=", base_damage, " accuracy=", accuracy, " evasion=", evasion)
+	# print("CombatProjectileManager.calculate_damage: base_damage=", base_damage, " accuracy=", accuracy, " evasion=", evasion)
 
 	# Delegate to DamageCalculator - includes reinforced armor, status effects, and correct crit logic
 	return DamageCalculator.calculate_damage(attacker, target, combat_scene)
@@ -433,85 +437,111 @@ func show_explosion_effect(position: Vector2, size: String = "Low"):
 
 func apply_burn_on_hit(attacker: Dictionary, target: Dictionary, damage_result: Dictionary):
 	"""Apply burn status effect if attacker has fire damage and burn chance"""
-	print("CombatProjectileManager: apply_burn_on_hit called")
-	print("  Attacker:", attacker.get("type", "unknown"))
-	print("  Target:", target.get("type", "unknown"))
-	print("  Miss:", damage_result.get("is_miss", false))
+	# print("CombatProjectileManager: apply_burn_on_hit called")
+	# print("  Attacker:", attacker.get("type", "unknown"))
+	# print("  Target:", target.get("type", "unknown"))
+	# print("  Miss:", damage_result.get("is_miss", false))
 
 	# Check if attack missed
 	if damage_result.get("is_miss", false):
-		print("  Attack missed, skipping burn")
+		# print("  Attack missed, skipping burn")
 		return
 
 	# Check if attacker has burn chance
 	var burn_chance = attacker.get("burn_on_hit_chance", 0.0)
-	print("  Burn chance:", burn_chance)
+	# print("  Burn chance:", burn_chance)
 	if burn_chance <= 0:
-		print("  No burn chance, skipping")
+		# print("  No burn chance, skipping")
 		return
 
 	# Roll for burn application
 	var roll = randf()
-	print("  Rolled:", roll, " vs chance:", burn_chance)
+	# print("  Rolled:", roll, " vs chance:", burn_chance)
 	if roll >= burn_chance:
-		print("  Roll failed, no burn")
+		# print("  Roll failed, no burn")
 		return
 
 	# Get status effect manager from combat scene
-	print("  Getting status manager...")
+	# print("  Getting status manager...")
 	if not combat_scene or not "status_effect_manager" in combat_scene:
-		print("  ERROR: No status effect manager available")
+		# print("  ERROR: No status effect manager available")
 		return
 
 	var status_manager = combat_scene.status_effect_manager
 	if not status_manager or not status_manager.has_method("apply_burn"):
-		print("  ERROR: Status manager doesn't have apply_burn method")
+		# print("  ERROR: Status manager doesn't have apply_burn method")
 		return
 
 	# Apply 1 stack of burn
-	print("  Applying burn to target...")
+	# print("  Applying burn to target...")
 	status_manager.apply_burn(target, 1)
-	print("  SUCCESS: Applied 1 burn stack to ", target.get("type", "target"))
+	# print("  SUCCESS: Applied 1 burn stack to ", target.get("type", "target"))
 
 
 func apply_freeze_on_hit(attacker: Dictionary, target: Dictionary, damage_result: Dictionary):
 	"""Apply freeze status effect if attacker has ice damage and freeze chance"""
-	print("CombatProjectileManager: apply_freeze_on_hit called")
-	print("  Attacker:", attacker.get("type", "unknown"))
-	print("  Target:", target.get("type", "unknown"))
-	print("  Miss:", damage_result.get("is_miss", false))
+	# print("CombatProjectileManager: apply_freeze_on_hit called")
+	# print("  Attacker:", attacker.get("type", "unknown"))
+	# print("  Target:", target.get("type", "unknown"))
+	# print("  Miss:", damage_result.get("is_miss", false))
 
 	# Check if attack missed
 	if damage_result.get("is_miss", false):
-		print("  Attack missed, skipping freeze")
+		# print("  Attack missed, skipping freeze")
 		return
 
 	# Check if attacker has freeze chance
 	var freeze_chance = attacker.get("freeze_on_hit_chance", 0.0)
-	print("  Freeze chance:", freeze_chance)
+	# print("  Freeze chance:", freeze_chance)
 	if freeze_chance <= 0:
-		print("  No freeze chance, skipping")
+		# print("  No freeze chance, skipping")
 		return
 
 	# Roll for freeze application
 	var roll = randf()
-	print("  Rolled:", roll, " vs chance:", freeze_chance)
+	# print("  Rolled:", roll, " vs chance:", freeze_chance)
 	if roll >= freeze_chance:
-		print("  Roll failed, no freeze")
+		# print("  Roll failed, no freeze")
 		return
 
 	# Get status effect manager from combat scene
-	print("  Getting status manager...")
+	# print("  Getting status manager...")
 	if not combat_scene or not "status_effect_manager" in combat_scene:
-		print("  ERROR: No status effect manager available")
+		# print("  ERROR: No status effect manager available")
 		return
 
 	var status_manager = combat_scene.status_effect_manager
 	if not status_manager or not status_manager.has_method("apply_freeze"):
-		print("  ERROR: Status manager doesn't have apply_freeze method")
+		# print("  ERROR: Status manager doesn't have apply_freeze method")
 		return
 
 	# Apply 1 stack of freeze
-	print("  Applying freeze to target...")
+	# print("  Applying freeze to target...")
 	status_manager.apply_freeze(target, 1)
-	print("  SUCCESS: Applied 1 freeze stack to ", target.get("type", "target"))
+	# print("  SUCCESS: Applied 1 freeze stack to ", target.get("type", "target"))
+
+func check_and_trigger_combos(attacker: Dictionary, target: Dictionary):
+	"""
+	Check if attacker can trigger elemental combos and execute them
+
+	Args:
+		attacker: The ship that attacked
+		target: The ship that was hit
+	"""
+	# Check if attacker has combo_trigger flag
+	if not attacker.get("combo_trigger", false):
+		return
+
+	# Get trigger type from attacker
+	var trigger_type = attacker.get("trigger_type", "")
+	if trigger_type == "":
+		print("CombatProjectileManager: Attacker has combo_trigger but no trigger_type")
+		return
+
+	print("CombatProjectileManager: Combo trigger detected! Type: ", trigger_type)
+
+	# Call combo system to check and execute combos
+	if combat_scene and combat_scene.combo_system:
+		combat_scene.combo_system.check_and_trigger_combos(trigger_type, target, combat_scene)
+	else:
+		print("CombatProjectileManager: No combo system available")

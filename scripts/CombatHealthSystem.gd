@@ -32,7 +32,7 @@ func _init(manager = null):
 # HEALTH BAR CREATION
 # ============================================================================
 
-func create_health_bar(ship_container: Control, ship_size: int, max_shield: int, max_armor: int):
+func create_health_bar(ship_container: Node2D, ship_size: int, max_shield: int, max_armor: int):
 	"""
 	Create health bar UI above a unit.
 
@@ -127,8 +127,8 @@ func update_health_bar(unit: Dictionary):
 
 	var unit_size = unit["size"]
 	var bar_width = min(32, unit_size)  # Cap at 32 pixels
-	var max_armor = unit["stats"]["armor"]
-	var max_shield = unit["stats"]["shield"]
+	var max_armor = unit.get("max_armor", 100)
+	var max_shield = unit.get("max_shield", 0)
 	var current_armor = unit.get("current_armor", max_armor)
 	var current_shield = unit.get("current_shield", max_shield)
 
@@ -191,7 +191,7 @@ func update_energy_bar(unit: Dictionary):
 
 	var unit_size = unit["size"]
 	var bar_width = min(32, unit_size)  # Cap at 32 pixels
-	var max_energy = unit["stats"].get("energy", 0)
+	var max_energy = unit.get("max_energy", 0)
 	var current_energy = unit.get("current_energy", 0)
 
 	# Update energy bar width
@@ -240,6 +240,15 @@ func apply_damage(target: Dictionary, damage: int) -> Dictionary:
 
 	if target.is_empty():
 		return damage_breakdown
+
+	# Check if target is a damage sponge (collective armor pool)
+	if target.get("is_sponge", false):
+		# Route to combat manager's sponge damage handler
+		if combat_manager and combat_manager.has_method("apply_sponge_damage"):
+			return combat_manager.apply_sponge_damage(target, damage)
+		else:
+			print("ERROR: Sponge detected but no combat_manager with apply_sponge_damage method!")
+			return damage_breakdown
 
 	var remaining_damage = damage
 
