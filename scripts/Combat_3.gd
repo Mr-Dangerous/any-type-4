@@ -910,7 +910,8 @@ func spawn_player_ship(ship_data: Dictionary, row: int, col: int, start_delay: f
 		"ability_queue": [],
 		"status_effects": [],
 		"temporary_modifiers": {},
-		"has_moved_this_turn": false
+		"has_moved_this_turn": false,
+		"movement_used_this_turn": 0  # Track distance moved in tactical phase
 	}
 
 	# Add to units array
@@ -1133,7 +1134,8 @@ func spawn_enemy_ship(ship_data: Dictionary, row: int, col: int, start_delay: fl
 		"ability_queue": [],
 		"status_effects": [],
 		"temporary_modifiers": {},
-		"has_moved_this_turn": false
+		"has_moved_this_turn": false,
+		"movement_used_this_turn": 0  # Track distance moved in tactical phase
 	}
 
 	# Occupy grid cell (check if already occupied first)
@@ -1682,6 +1684,7 @@ func handle_cleanup_phase():
 	# Reset movement flags for all units
 	for unit in all_units:
 		unit["has_moved_this_turn"] = false
+		unit["movement_used_this_turn"] = 0  # Reset movement budget
 		# Clear temporary modifiers
 		unit["temporary_modifiers"] = {}
 		# Clear ability queues (when we implement them)
@@ -2086,17 +2089,23 @@ func calculate_valid_move_cells(unit: Dictionary) -> Array:
 		return valid_cells
 
 	var movement_speed = unit.get("movement_speed", 2)
+	var movement_used = unit.get("movement_used_this_turn", 0)
+	var movement_remaining = movement_speed - movement_used
 
-	# Check all cells within Manhattan distance
+	# No movement left
+	if movement_remaining <= 0:
+		return valid_cells
+
+	# Check all cells within remaining Manhattan distance
 	for row in range(CombatGridManager.GRID_ROWS):
 		for col in range(active_scenario_width):
 			# Skip starting position
 			if row == start_grid.x and col == start_grid.y:
 				continue
 
-			# Check Manhattan distance
+			# Check Manhattan distance against remaining movement
 			var manhattan = abs(row - start_grid.x) + abs(col - start_grid.y)
-			if manhattan > movement_speed:
+			if manhattan > movement_remaining:
 				continue
 
 			# Check direction (cannot move right toward enemy)
@@ -2209,6 +2218,14 @@ func execute_tactical_move(unit: Dictionary, target_grid: Vector2i):
 	# Calculate overshoot direction (past the target)
 	var direction = (target_pos - start_pos).normalized()
 	var overshoot_pos = target_pos + (direction * overshoot_distance)
+
+	# Calculate movement cost (Manhattan distance from current position)
+	var start_grid = unit["grid_pos"]
+	var distance_moved = abs(target_grid.x - start_grid.x) + abs(target_grid.y - start_grid.y)
+	unit["movement_used_this_turn"] = unit.get("movement_used_this_turn", 0) + distance_moved
+	unit["has_moved_this_turn"] = true
+
+	print("Combat_3: Unit moved ", distance_moved, " cells (total used: ", unit["movement_used_this_turn"], "/", movement_speed, ")")
 
 	# Update grid occupancy immediately (tactical phase is static)
 	CombatGridManager.free_cell(unit["grid_pos"].x, unit["grid_pos"].y)
